@@ -11,66 +11,24 @@ interface LavalinkNodeConfig {
 }
 
 const DEFAULT_LAVALINK_NODES: LavalinkNodeConfig[] = [
-  {
-    name: "jirayu-ssl",
-    url: "lavalink.jirayu.net:443",
-    auth: "youshallnotpass",
-    secure: true,
-  },
-  {
-    name: "jirayu",
-    url: "lavalink.jirayu.net:13592",
-    auth: "youshallnotpass",
-    secure: false,
-  },
-  {
-    name: "serenetia-v4",
-    url: "lavalinkv4.serenetia.com:443",
-    auth: "https://seretia.link/discord",
-    secure: true,
-  },
-  {
-    name: "serenetia-universal",
-    url: "lavalink.serenetia.com:443",
-    auth: "https://seretia.link/discord",
-    secure: true,
-  },
-  {
-    name: "ajieblogs",
-    url: "lava-v4.ajieblogs.eu.org:443",
-    auth: "https://dsc.gg/ajidevserver",
-    secure: true,
-  },
-  {
-    name: "millohost",
-    url: "lava-v4.millohost.my.id:443",
-    auth: "https://discord.gg/mjS5J2K3ep",
-    secure: true,
-  },
-  {
-    name: "triniumhost-ssl",
-    url: "lavalink-v4.triniumhost.com:443",
-    auth: "free",
-    secure: true,
-  },
-  {
-    name: "triniumhost",
-    url: "lavalink.triniumhost.com:4333",
-    auth: "free",
-    secure: false,
-  },
-  {
-    name: "nyxbot-sg1",
-    url: "sg1-nodelink.nyxbot.app:3000",
-    auth: "nyxbot.app/support",
-    secure: false,
-  },
-  {
-    name: "nyxbot-sg2",
-    url: "sg2-nodelink.nyxbot.app:3000",
-    auth: "nyxbot.app/support",
-    secure: false,
-  },
+  // Jirayu — stable, ~99% uptime
+  { name: "jirayu-ssl", url: "lavalink.jirayu.net:443", auth: "youshallnotpass", secure: true },
+  { name: "jirayu", url: "lavalink.jirayu.net:13592", auth: "youshallnotpass", secure: false },
+
+  // Serenetia / AjieDev v4 — ~99.4% uptime (SSL + non-SSL for redundancy)
+  { name: "serenetia-v4-ssl", url: "lavalinkv4.serenetia.com:443", auth: "https://dsc.gg/ajidevserver", secure: true },
+  { name: "serenetia-v4", url: "lavalinkv4.serenetia.com:80", auth: "https://dsc.gg/ajidevserver", secure: false },
+
+  // Serenetia universal (v3+v4 combined) — SSL + non-SSL
+  { name: "serenetia-ssl", url: "lavalink.serenetia.com:443", auth: "https://dsc.gg/ajidevserver", secure: true },
+  { name: "serenetia", url: "lavalink.serenetia.com:80", auth: "https://dsc.gg/ajidevserver", secure: false },
+
+  // Millohost — ~98% uptime
+  { name: "millohost", url: "lava-v4.millohost.my.id:443", auth: "https://discord.gg/mjS5J2K3ep", secure: true },
+
+  // NyxBot Singapore nodes
+  { name: "nyxbot-sg1", url: "sg1-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
+  { name: "nyxbot-sg2", url: "sg2-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
 ];
 
 function parseBoolean(value: string | undefined): boolean {
@@ -864,34 +822,61 @@ export async function searchTracks(query: string, limit = 5): Promise<SearchResu
   if (!node) return [];
 
   const isUrl = /^https?:\/\//i.test(query);
-  const identifier = isUrl ? query : `ytsearch:${query}`;
+
+  const toResult = (raw: any): SearchResult => ({
+    title: raw.info.title,
+    author: raw.info.author,
+    uri: raw.info.uri,
+    duration: raw.info.length,
+    isStream: raw.info.isStream,
+  });
 
   try {
-    const result = await node.rest.resolve(identifier);
-    if (!result) return [];
+    if (isUrl) {
+      const result = await node.rest.resolve(query);
+      if (!result) return [];
+      if (result.loadType === "search") return (result.data as any[]).slice(0, limit).map(toResult);
+      if (result.loadType === "track") return [toResult(result.data)];
+      if (result.loadType === "playlist") return ((result.data as any).tracks as any[]).slice(0, limit).map(toResult);
+      return [];
+    }
 
-    const toResult = (raw: any): SearchResult => ({
-      title: raw.info.title,
-      author: raw.info.author,
-      uri: raw.info.uri,
-      duration: raw.info.length,
-      isStream: raw.info.isStream,
-    });
-
-    if (result.loadType === "search") {
-      return (result.data as any[]).slice(0, limit).map(toResult);
-    }
-    if (result.loadType === "track") {
-      return [toResult(result.data)];
-    }
-    if (result.loadType === "playlist") {
-      const tracks = (result.data as any).tracks as any[];
-      return tracks.slice(0, limit).map(toResult);
-    }
+    // Non-URL: try multiple search sources so YouTube blocks don't kill search
+    const raws = await resolveSearchMultiple(node, query, limit);
+    return raws.map(toResult);
   } catch {
     // silently return empty on search errors
   }
 
+  return [];
+}
+
+// Try multiple search sources so YouTube rate-limits don't silently kill search
+const SEARCH_PREFIXES = ["ytmsearch", "ytsearch", "scsearch"];
+
+async function resolveSearch(node: any, query: string): Promise<any | null> {
+  for (const prefix of SEARCH_PREFIXES) {
+    try {
+      const result = await node.rest.resolve(`${prefix}:${query}`);
+      if (result?.loadType === "search") {
+        const tracks = result.data as any[];
+        if (tracks.length) return tracks[0];
+      }
+    } catch { /* try next source */ }
+  }
+  return null;
+}
+
+async function resolveSearchMultiple(node: any, query: string, limit: number): Promise<any[]> {
+  for (const prefix of SEARCH_PREFIXES) {
+    try {
+      const result = await node.rest.resolve(`${prefix}:${query}`);
+      if (result?.loadType === "search") {
+        const tracks = result.data as any[];
+        if (tracks.length) return tracks.slice(0, limit);
+      }
+    } catch { /* try next source */ }
+  }
   return [];
 }
 
@@ -925,12 +910,7 @@ async function spotifyFallbackRaw(node: any, url: string): Promise<any | null> {
   const meta = await fetchSpotifyOEmbed(url);
   if (!meta) return null;
   const q = meta.author ? `${meta.author} ${meta.title}` : meta.title;
-  const fallback = await node.rest.resolve(`ytsearch:${q}`);
-  if (fallback?.loadType === "search") {
-    const tracks = fallback.data as any[];
-    return tracks.length ? tracks[0] : null;
-  }
-  return null;
+  return resolveSearch(node, q);
 }
 
 export async function resolveTrack(
