@@ -1260,6 +1260,11 @@ export async function startAlfie(): Promise<void> {
   }
 }
 
+export function getAlfieGuilds(): Array<{ id: string; name: string }> {
+  if (!client) return [];
+  return [...client.guilds.cache.values()].map((g) => ({ id: g.id, name: g.name }));
+}
+
 export function stopAlfie(): void {
   if (loginRetryTimer) { clearTimeout(loginRetryTimer); loginRetryTimer = null; }
   for (const t of backgroundTimers) { clearInterval(t); clearTimeout(t); }

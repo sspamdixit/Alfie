@@ -16,7 +16,7 @@ interface ManagedGuild {
   iconUrl: string | null;
   owner: boolean;
   permissions: string;
-  hasFred: boolean;
+  hasAlfie: boolean;
 }
 
 export default function ServersPage() {
@@ -53,8 +53,8 @@ export default function ServersPage() {
     window.open(`${inviteUrl}&guild_id=${guildId}&disable_guild_select=true`, "_blank");
   };
 
-  const activeGuilds = guilds.filter((g) => g.hasFred);
-  const otherGuilds = guilds.filter((g) => !g.hasFred);
+  const activeGuilds = guilds.filter((g) => g.hasAlfie);
+  const otherGuilds = guilds.filter((g) => !g.hasAlfie);
 
   if (loading) {
     return (
@@ -126,7 +126,6 @@ export default function ServersPage() {
                   key={guild.id}
                   guild={guild}
                   active
-                  onConfigure={() => navigate(`/servers/${guild.id}`)}
                   onAdd={() => handleAdd(guild.id)}
                 />
               ))}
@@ -143,7 +142,6 @@ export default function ServersPage() {
                   key={guild.id}
                   guild={guild}
                   active={false}
-                  onConfigure={() => navigate(`/servers/${guild.id}`)}
                   onAdd={() => handleAdd(guild.id)}
                 />
               ))}
@@ -164,12 +162,10 @@ export default function ServersPage() {
 function GuildCard({
   guild,
   active,
-  onConfigure,
   onAdd,
 }: {
   guild: ManagedGuild;
   active: boolean;
-  onConfigure: () => void;
   onAdd: () => void;
 }) {
   return (
@@ -190,21 +186,16 @@ function GuildCard({
         </div>
       </div>
 
-      {active ? (
-        <button
-          onClick={onConfigure}
-          className="w-full py-2 text-sm font-medium text-white border border-white/15 rounded-md hover:border-white/30 hover:bg-white/5 transition-colors"
-        >
-          Configure →
-        </button>
-      ) : (
-        <button
-          onClick={onAdd}
-          className="w-full py-2 text-sm font-medium text-white/50 border border-white/8 rounded-md hover:border-white/20 hover:text-white/70 transition-colors"
-        >
-          Add Alfie
-        </button>
-      )}
+      <button
+        onClick={onAdd}
+        className={`w-full py-2 text-sm font-medium rounded-md transition-colors border ${
+          active
+            ? "text-white border-white/15 hover:border-white/30 hover:bg-white/5"
+            : "text-white/50 border-white/8 hover:border-white/20 hover:text-white/70"
+        }`}
+      >
+        {active ? "Add again →" : "Add Alfie"}
+      </button>
     </div>
   );
 }

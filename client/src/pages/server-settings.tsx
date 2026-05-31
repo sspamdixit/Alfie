@@ -1,140 +1,35 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 
 interface GuildInfo {
   id: string;
   name: string;
   iconUrl: string | null;
-  hasFred: boolean;
+  hasAlfie: boolean;
 }
 
-interface GuildSettings {
-  personaOverride: string | null;
-  temperature: number;
-  chattiness: number;
-  proactivity: number;
-  memoryEnabled: boolean;
-  responseLength: number;
-  language: string;
-  deadChatChannelId: string | null;
-  allowedChannels: string | null;
-}
-
-const DEFAULTS: GuildSettings = {
-  personaOverride: "",
-  temperature: 7,
-  chattiness: 5,
-  proactivity: 3,
-  memoryEnabled: true,
-  responseLength: 3,
-  language: "auto",
-  deadChatChannelId: "",
-  allowedChannels: "",
-};
-
-function NumericBar({
-  value,
-  max,
-  onChange,
-  lowLabel,
-  highLabel,
-}: {
-  value: number;
-  max: number;
-  onChange: (v: number) => void;
-  lowLabel?: string;
-  highLabel?: string;
-}) {
-  return (
-    <div className="space-y-2.5">
-      <div className="flex gap-1.5">
-        {[...Array(max + 1)].map((_, i) => (
-          <button
-            key={i}
-            onClick={() => onChange(i)}
-            className={`flex-1 h-8 rounded text-xs font-semibold transition-colors border ${
-              i === value
-                ? "bg-white text-[#111] border-white"
-                : i < value
-                ? "bg-white/15 border-white/20 text-white/50 hover:bg-white/20"
-                : "bg-transparent border-white/[0.08] text-white/20 hover:bg-white/5"
-            }`}
-          >
-            {i}
-          </button>
-        ))}
-      </div>
-      {(lowLabel || highLabel) && (
-        <div className="flex justify-between text-xs text-white/25">
-          <span>{lowLabel}</span>
-          <span>{highLabel}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NumericScale({
-  value,
-  max,
-  onChange,
-  labels,
-}: {
-  value: number;
-  max: number;
-  onChange: (v: number) => void;
-  labels?: Record<number, string>;
-}) {
-  return (
-    <div className="space-y-2.5">
-      <div className="flex gap-1.5">
-        {[...Array(max)].map((_, i) => {
-          const v = i + 1;
-          return (
-            <button
-              key={v}
-              onClick={() => onChange(v)}
-              className={`flex-1 h-9 rounded text-xs font-semibold transition-colors border ${
-                v === value
-                  ? "bg-white text-[#111] border-white"
-                  : v < value
-                  ? "bg-white/15 border-white/20 text-white/50 hover:bg-white/20"
-                  : "bg-transparent border-white/[0.08] text-white/20 hover:bg-white/5"
-              }`}
-            >
-              {v}
-            </button>
-          );
-        })}
-      </div>
-      {labels && labels[value] && (
-        <p className="text-xs text-white/35">{labels[value]}</p>
-      )}
-    </div>
-  );
-}
-
-function Row({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="py-7 border-b border-white/[0.07]">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-5">
-        <div className="sm:w-52 shrink-0">
-          <p className="text-sm font-semibold text-white mb-1">{label}</p>
-          <p className="text-xs text-white/35 leading-relaxed">{hint}</p>
-        </div>
-        <div className="flex-1 max-w-sm">{children}</div>
-      </div>
-    </div>
-  );
-}
+const COMMANDS = [
+  { name: "/play", desc: "Play a song or playlist in your voice channel" },
+  { name: "/playtop", desc: "Add a song to the front of the queue" },
+  { name: "/skip", desc: "Skip the current track (vote-skip with 3+ listeners)" },
+  { name: "/queue", desc: "Show the current music queue" },
+  { name: "/nowplaying", desc: "Show what's currently playing" },
+  { name: "/pause / /resume", desc: "Pause or resume playback" },
+  { name: "/volume", desc: "Set the playback volume (0–100)" },
+  { name: "/shuffle", desc: "Shuffle the queue" },
+  { name: "/loop", desc: "Cycle loop mode: off → track → queue → off" },
+  { name: "/seek", desc: "Seek to a position in the current track" },
+  { name: "/lyrics", desc: "Fetch lyrics for the current or searched song" },
+  { name: "/history", desc: "Show the last 20 tracks played this session" },
+  { name: "/autoplay", desc: "Toggle autoplay when the queue runs out" },
+  { name: "/savequeue", desc: "Save the current queue as a named playlist" },
+  { name: "/playlist", desc: "List, load, or delete saved playlists" },
+  { name: "/rave", desc: "Start an infinite genre-based rave with DJ commentary" },
+  { name: "/ravestop", desc: "Stop the current rave session" },
+  { name: "/speak", desc: "Say something in the voice channel via TTS" },
+  { name: "/stop", desc: "Stop music and disconnect" },
+  { name: "/disconnect", desc: "Disconnect from the voice channel" },
+];
 
 export default function ServerSettingsPage() {
   const [, navigate] = useLocation();
@@ -142,86 +37,19 @@ export default function ServerSettingsPage() {
   const guildId = match ? params?.guildId : null;
 
   const [guild, setGuild] = useState<GuildInfo | null>(null);
-  const [settings, setSettings] = useState<GuildSettings>(DEFAULTS);
-  const [saved, setSaved] = useState<GuildSettings>(DEFAULTS);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
-  const [error, setError] = useState<string | null>(null);
-
-  const isDirty = JSON.stringify(settings) !== JSON.stringify(saved);
 
   useEffect(() => {
     if (!guildId) return;
-    Promise.all([
-      fetch(`/api/public/guilds/${guildId}/info`, { credentials: "include" }).then((r) => r.ok ? r.json() : null),
-      fetch(`/api/public/guilds/${guildId}/settings`, { credentials: "include" }).then((r) => r.ok ? r.json() : null),
-    ])
-      .then(([guildInfo, guildSettings]) => {
-        if (!guildInfo) { navigate("/servers"); return; }
-        setGuild(guildInfo);
-        if (guildSettings) {
-          const s: GuildSettings = {
-            personaOverride: guildSettings.personaOverride ?? "",
-            temperature: guildSettings.temperature ?? 7,
-            chattiness: guildSettings.chattiness ?? 5,
-            proactivity: guildSettings.proactivity ?? 3,
-            memoryEnabled: guildSettings.memoryEnabled ?? true,
-            responseLength: guildSettings.responseLength ?? 3,
-            language: guildSettings.language ?? "auto",
-            deadChatChannelId: guildSettings.deadChatChannelId ?? "",
-            allowedChannels: guildSettings.allowedChannels ?? "",
-          };
-          setSettings(s);
-          setSaved(s);
-        }
+    fetch(`/api/public/guilds/${guildId}/info`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((info) => {
+        if (!info) { navigate("/servers"); return; }
+        setGuild(info);
       })
-      .catch(() => setError("Failed to load settings."))
+      .catch(() => navigate("/servers"))
       .finally(() => setLoading(false));
   }, [guildId, navigate]);
-
-  const handleSave = async () => {
-    if (!guildId || !isDirty || saving) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/public/guilds/${guildId}/settings`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...settings, personaOverride: settings.personaOverride?.trim() || null }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d.error ?? "Save failed");
-      }
-      const updated = await res.json();
-      const s: GuildSettings = {
-        personaOverride: updated.personaOverride ?? "",
-        temperature: updated.temperature ?? 7,
-        chattiness: updated.chattiness ?? 5,
-        proactivity: updated.proactivity ?? 3,
-        memoryEnabled: updated.memoryEnabled ?? true,
-        responseLength: updated.responseLength ?? 3,
-        language: updated.language ?? "auto",
-        deadChatChannelId: updated.deadChatChannelId ?? "",
-        allowedChannels: updated.allowedChannels ?? "",
-      };
-      setSettings(s);
-      setSaved(s);
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 2500);
-    } catch (err: any) {
-      setError(err.message);
-      setSaveStatus("error");
-      setTimeout(() => setSaveStatus("idle"), 3000);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const update = useCallback(<K extends keyof GuildSettings>(key: K, value: GuildSettings[K]) => {
-    setSettings((prev) => ({ ...prev, [key]: value }));
-  }, []);
 
   if (loading) {
     return (
@@ -230,27 +58,6 @@ export default function ServerSettingsPage() {
       </div>
     );
   }
-
-  const temperatureLabels: Record<number, string> = {
-    1: "Precise — consistent, factual, predictable",
-    2: "Grounded",
-    3: "Balanced",
-    4: "Creative",
-    5: "Inventive",
-    6: "Loose",
-    7: "Free-ranging",
-    8: "Unpredictable",
-    9: "Wild",
-    10: "Unhinged",
-  };
-
-  const lengthLabels: Record<number, string> = {
-    1: "Minimal — one or two sentences, always",
-    2: "Short — brief by default",
-    3: "Normal — Alfie's default",
-    4: "Generous — detailed when it helps",
-    5: "Thorough — goes long when warranted",
-  };
 
   return (
     <div className="min-h-screen bg-[#111111] text-[#f0f0f0]" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -274,39 +81,17 @@ export default function ServerSettingsPage() {
               </div>
             )}
           </div>
-
-          <div className="flex items-center gap-3">
-            {isDirty && (
-              <button
-                onClick={() => setSettings(saved)}
-                className="text-sm text-white/30 hover:text-white/60 transition-colors"
-              >
-                Discard
-              </button>
-            )}
-            <button
-              onClick={handleSave}
-              disabled={!isDirty || saving}
-              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                isDirty && !saving
-                  ? "bg-white text-[#111] hover:bg-white/90"
-                  : "bg-white/10 text-white/30 cursor-not-allowed"
-              }`}
-            >
-              {saving ? "Saving…" : saveStatus === "saved" ? "Saved ✓" : saveStatus === "error" ? "Error" : "Save"}
-            </button>
-          </div>
         </div>
       </nav>
 
       <main className="pt-24 pb-20 px-6 max-w-3xl mx-auto">
 
-        {guild && !guild.hasFred && (
+        {guild && !guild.hasAlfie && (
           <div className="mb-8 p-4 rounded-lg border border-white/[0.1] bg-white/[0.03]">
             <p className="text-sm text-white/60 mb-1 font-medium">Alfie isn't in this server yet</p>
-            <p className="text-xs text-white/30 mb-3">Settings will save, but Alfie needs to be added before they take effect.</p>
+            <p className="text-xs text-white/30 mb-3">Add Alfie to start using music commands.</p>
             <a
-              href={`/api/public/invite-url?guild_id=${guild.id}`}
+              href={`/api/public/invite-url?guild_id=${guild?.id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-white/50 hover:text-white/80 transition-colors underline underline-offset-4"
@@ -316,173 +101,35 @@ export default function ServerSettingsPage() {
           </div>
         )}
 
-        {error && (
-          <div className="mb-6 p-4 rounded-lg border border-red-500/20 bg-red-500/5">
-            <p className="text-sm text-red-400">{error}</p>
-          </div>
-        )}
-
         <div className="mb-10">
-          <h1 className="text-2xl font-bold text-white mb-1">Server settings</h1>
-          <p className="text-sm text-white/30">Configure how Alfie behaves in {guild?.name ?? "this server"}.</p>
+          <h1 className="text-2xl font-bold text-white mb-1">{guild?.name ?? "Server"}</h1>
+          <p className="text-sm text-white/30">
+            {guild?.hasAlfie ? "Alfie is active in this server." : "Alfie is not in this server yet."}
+          </p>
         </div>
 
-        <div className="border-t border-white/[0.07]">
-
-          <Row
-            label="Custom persona"
-            hint="Fully replaces Alfie's default personality for this server. Write a complete character description. Leave blank to keep the default."
-          >
-            <textarea
-              value={settings.personaOverride ?? ""}
-              onChange={(e) => update("personaOverride", e.target.value)}
-              placeholder="e.g. you are a no-nonsense assistant for a game dev server. you know unity, unreal, and godot inside out. you are concise, technical, and mildly sarcastic about scope creep."
-              rows={4}
-              maxLength={1000}
-              className="w-full bg-white/[0.04] border border-white/[0.1] focus:border-white/25 focus:outline-none rounded-lg px-4 py-3 text-sm text-white placeholder-white/20 resize-none transition-colors"
-            />
-            <p className="mt-1.5 text-xs text-white/20 text-right">
-              {(settings.personaOverride ?? "").length}/1000
-            </p>
-          </Row>
-
-          <Row
-            label="Temperature"
-            hint="How creative and unpredictable Alfie's responses are. Low = consistent. High = surprising."
-          >
-            <NumericScale
-              value={settings.temperature}
-              max={10}
-              onChange={(v) => update("temperature", v)}
-              labels={temperatureLabels}
-            />
-          </Row>
-
-          <Row
-            label="Chattiness"
-            hint="How often Alfie joins conversations she wasn't directly addressed in."
-          >
-            <NumericBar
-              value={settings.chattiness}
-              max={10}
-              onChange={(v) => update("chattiness", v)}
-              lowLabel="Only when mentioned"
-              highLabel="Jumps in constantly"
-            />
-          </Row>
-
-          <Row
-            label="Proactivity"
-            hint="How often Alfie starts conversations on her own — dead chat revivals, observations, check-ins."
-          >
-            <NumericBar
-              value={settings.proactivity}
-              max={10}
-              onChange={(v) => update("proactivity", v)}
-              lowLabel="Never initiates"
-              highLabel="Constantly active"
-            />
-          </Row>
-
-          <Row
-            label="Memory"
-            hint="Alfie builds and uses long-term memory of users and server lore. Disable for a stateless experience."
-          >
-            <button
-              onClick={() => update("memoryEnabled", !settings.memoryEnabled)}
-              className="flex items-center gap-3 group"
-            >
-              <div className={`w-10 h-5.5 rounded-full relative transition-colors ${settings.memoryEnabled ? "bg-white" : "bg-white/15"}`}
-                style={{ height: "22px" }}
-              >
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full shadow transition-transform ${settings.memoryEnabled ? "translate-x-5 bg-[#111]" : "translate-x-0.5 bg-white/50"}`} />
+        <div className="mb-6">
+          <p className="text-xs text-white/25 uppercase tracking-widest font-medium mb-5">Available commands</p>
+          <div className="divide-y divide-white/[0.05]">
+            {COMMANDS.map((cmd) => (
+              <div key={cmd.name} className="py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <code className="text-sm text-white/80 font-mono">{cmd.name}</code>
+                <p className="text-xs text-white/35">{cmd.desc}</p>
               </div>
-              <span className="text-sm text-white/50 group-hover:text-white/70 transition-colors">
-                {settings.memoryEnabled ? "Enabled" : "Disabled"}
-              </span>
-            </button>
-          </Row>
-
-          <Row
-            label="Response length"
-            hint="Alfie's default verbosity. Her baseline is short — this raises the ceiling."
-          >
-            <NumericScale
-              value={settings.responseLength}
-              max={5}
-              onChange={(v) => update("responseLength", v)}
-              labels={lengthLabels}
-            />
-          </Row>
-
-          <Row
-            label="Language"
-            hint="Response language. Auto mirrors what users write in. Force English or Dutch for consistency."
-          >
-            <div className="flex gap-2">
-              {[
-                { value: "auto", label: "Auto" },
-                { value: "en", label: "English" },
-                { value: "nl", label: "Dutch" },
-              ].map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => update("language", opt.value)}
-                  className={`px-4 py-2 rounded-md text-sm font-medium border transition-colors ${
-                    settings.language === opt.value
-                      ? "bg-white text-[#111] border-white"
-                      : "bg-transparent border-white/[0.1] text-white/40 hover:border-white/25 hover:text-white/60"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </Row>
-
-          <Row
-            label="Dead-chat channel"
-            hint="Channel ID where Alfie will break the silence when proactivity is on. Right-click a channel in Discord (Developer Mode) → Copy Channel ID."
-          >
-            <input
-              type="text"
-              className="w-full bg-white/[0.04] border border-white/[0.1] rounded-md px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-white/30"
-              placeholder="e.g. 1234567890123456789"
-              value={settings.deadChatChannelId ?? ""}
-              onChange={(e) => update("deadChatChannelId", e.target.value)}
-            />
-          </Row>
-
-          <Row
-            label="Allowed channels"
-            hint="Comma-separated channel IDs where Alfie can passively chime in unprompted. Leave empty to allow all channels. Get IDs via Discord Developer Mode → right-click channel → Copy Channel ID."
-          >
-            <textarea
-              className="w-full bg-white/[0.04] border border-white/[0.1] rounded-md px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-white/30 resize-none"
-              rows={3}
-              placeholder={"1234567890123456789,\n9876543210987654321"}
-              value={settings.allowedChannels ?? ""}
-              onChange={(e) => update("allowedChannels", e.target.value)}
-            />
-          </Row>
-
+            ))}
+          </div>
         </div>
 
-        {isDirty && (
-          <div className="mt-8 flex justify-end gap-3">
-            <button
-              onClick={() => setSettings(saved)}
-              className="px-4 py-2 text-sm text-white/40 hover:text-white/70 transition-colors"
+        {guild?.hasAlfie && (
+          <div className="mt-10 pt-8 border-t border-white/[0.07]">
+            <a
+              href={`/api/public/invite-url?guild_id=${guild.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-white/30 hover:text-white/60 transition-colors underline underline-offset-4"
             >
-              Discard changes
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="px-5 py-2 text-sm font-medium bg-white text-[#111] rounded-md hover:bg-white/90 transition-colors disabled:opacity-50"
-            >
-              {saving ? "Saving…" : "Save changes"}
-            </button>
+              Re-invite Alfie to this server
+            </a>
           </div>
         )}
       </main>

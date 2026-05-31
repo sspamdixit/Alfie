@@ -2,12 +2,8 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { startBot, getBotStatus } from "./bot";
 import { startAlfie, getAlfieBotStatus } from "../alfie/bot";
 import { initSocket } from "./socket";
-import { ensureUserMemoryTable } from "./storage";
-import { ensureSemanticMemoryTable } from "./semantic-memory";
-import { ensureGuildSettingsTable } from "./guild-settings";
 import session from "express-session";
 import createMemoryStore from "memorystore";
 
@@ -44,8 +40,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Session middleware (must come before routes)
-const sessionSecret = process.env.SESSION_SECRET ?? "fred-dev-secret-change-in-prod";
+const sessionSecret = process.env.SESSION_SECRET ?? "alfie-dev-secret-change-in-prod";
 app.use(
   session({
     secret: sessionSecret,
@@ -58,7 +53,7 @@ app.use(
       maxAge: 7 * 24 * 60 * 60 * 1000,
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     },
-    name: "fred.sid",
+    name: "alfie.sid",
   }),
 );
 
@@ -82,7 +77,7 @@ app.use(
 app.use(express.urlencoded({ extended: false, limit: "16kb" }));
 
 app.get("/health", (_req, res) => {
-  const bot = getBotStatus();
+  const bot = getAlfieBotStatus();
   res.status(200).json({
     status: "ok",
     bot: {
@@ -154,26 +149,6 @@ function startKeepAlive() {
 }
 
 (async () => {
-  try {
-    await ensureUserMemoryTable();
-    log("user_memory table ready.", "memory");
-  } catch (err: any) {
-    log(`user_memory table check failed; continuing: ${err.message}`, "memory");
-  }
-
-  try {
-    await ensureSemanticMemoryTable();
-  } catch (err: any) {
-    log(`semantic memory init failed; continuing: ${err.message}`, "memory");
-  }
-
-  try {
-    await ensureGuildSettingsTable();
-    log("guild_settings table ready.", "memory");
-  } catch (err: any) {
-    log(`guild_settings table check failed; continuing: ${err.message}`, "memory");
-  }
-
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
@@ -205,11 +180,6 @@ function startKeepAlive() {
     },
     () => {
       log(`serving on port ${port}`);
-      if (process.env.ENABLE_BOT === "true") {
-        startBot();
-      } else {
-        log("Bot auto-start disabled. Set ENABLE_BOT=true to start.", "discord");
-      }
       if (process.env.ENABLE_ALFIE === "true") {
         startAlfie();
       } else {

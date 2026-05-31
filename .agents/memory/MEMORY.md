@@ -1,0 +1,1 @@
+- [Alfie cleanup](alfie-cleanup.md) — Fred→Alfie migration: what was removed, what was kept, and key wiring decisions.

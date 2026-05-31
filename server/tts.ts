@@ -23,7 +23,7 @@ export async function resolveTTSTrack(text: string, requestedBy = "tts"): Promis
     const track = await resolveTrack(url, requestedBy);
     if (track) {
       track.title = `[TTS] ${text.slice(0, 80)}`;
-      track.author = "Fred TTS";
+      track.author = "Alfie TTS";
     }
     return track;
   } catch (err: any) {

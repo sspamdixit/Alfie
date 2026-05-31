@@ -1,9 +1,9 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 const DASHBOARD_AUTH_HEADER = "x-dashboard-auth-token";
-export const DASHBOARD_AUTH_TOKEN_STORAGE_KEY = "fred-dashboard-auth-token";
-const DASHBOARD_AUTH_FLAG_STORAGE_KEY = "fred-authed";
-export const DASHBOARD_AUTH_CHANGED_EVENT = "fred-auth-changed";
+export const DASHBOARD_AUTH_TOKEN_STORAGE_KEY = "alfie-dashboard-auth-token";
+const DASHBOARD_AUTH_FLAG_STORAGE_KEY = "alfie-authed";
+export const DASHBOARD_AUTH_CHANGED_EVENT = "alfie-auth-changed";
 
 function getDashboardAuthToken(): string | null {
   if (typeof window === "undefined") {

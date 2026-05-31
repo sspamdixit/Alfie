@@ -1,4 +1,4 @@
-import type { Request, Response } from "express";
+import type { Request } from "express";
 import { log } from "./index";
 
 export interface DiscordUser {
@@ -43,7 +43,9 @@ export function getOAuthUrl(req: Request): string {
 export function getBotInviteUrl(guildId?: string): string {
   const clientId = process.env.DISCORD_CLIENT_ID;
   if (!clientId) throw new Error("DISCORD_CLIENT_ID is not set");
-  const permissions = "277025770560";
+  // Music bot permissions: View Channel, Send Messages, Embed Links, Attach Files,
+  // Read Message History, Add Reactions, Manage Messages, Connect, Speak, Use VAD
+  const permissions = "36826176";
   const params = new URLSearchParams({
     client_id: clientId,
     scope: "bot applications.commands",
