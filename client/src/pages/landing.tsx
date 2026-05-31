@@ -1,41 +1,49 @@
 import { useEffect, useState } from "react";
 
-const MUSIC_FEATURES = [
-  {
-    num: "01",
-    title: "YouTube & Spotify",
-    desc: "Stream anything. Paste a link, search a name, or drop a playlist. Alfie handles the rest.",
-  },
-  {
-    num: "02",
-    title: "Smart queue",
-    desc: "Add tracks, skip by vote, shuffle, loop, view history. Full queue control from Discord.",
-  },
-  {
-    num: "03",
-    title: "Now playing",
-    desc: "Live progress bar, album art, and on-demand lyrics. Always know what's on.",
-  },
-  {
-    num: "04",
-    title: "Rave mode",
-    desc: "BPM-matched energy builds, auto crossfade, and mood-aware discovery for the long sessions.",
-  },
-  {
-    num: "05",
-    title: "Voice commands",
-    desc: "Play, pause, skip, volume — all slash commands. Nothing to install, nothing to configure.",
-  },
-  {
-    num: "06",
-    title: "Text-to-speech",
-    desc: "Drop a message into voice with /speak. Announcements, jokes, chaos — your call.",
-  },
+const BL = "'UnifrakturMaguntia', serif";
+const SERIF = "'Cormorant Garamond', serif";
+
+const FISHNET: React.CSSProperties = {
+  backgroundImage: `
+    repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(255,255,255,0.055) 5px, rgba(255,255,255,0.055) 6px),
+    repeating-linear-gradient(-45deg, transparent, transparent 5px, rgba(255,255,255,0.055) 5px, rgba(255,255,255,0.055) 6px)
+  `,
+};
+
+const CrossSVG = ({ size = 80, opacity = 1 }: { size?: number; opacity?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 100 100" fill="none" style={{ opacity }}>
+    {/* Vertical arm */}
+    <rect x="41" y="8" width="18" height="84" fill="white" />
+    {/* Horizontal arm */}
+    <rect x="8" y="38" width="84" height="18" fill="white" />
+    {/* Flare caps — top */}
+    <polygon points="50,2 44,14 56,14" fill="white" />
+    {/* Flare caps — bottom */}
+    <polygon points="50,98 44,86 56,86" fill="white" />
+    {/* Flare caps — left */}
+    <polygon points="2,50 14,44 14,56" fill="white" />
+    {/* Flare caps — right */}
+    <polygon points="98,50 86,44 86,56" fill="white" />
+  </svg>
+);
+
+const HeartSVG = ({ size = 20, opacity = 1 }: { size?: number; opacity?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 100 90" fill="white" style={{ opacity }}>
+    <path d="M50 85 C50 85 5 52 5 28 C5 14 16 5 28 5 C38 5 46 11 50 18 C54 11 62 5 72 5 C84 5 95 14 95 28 C95 52 50 85 50 85Z" />
+  </svg>
+);
+
+const FEATURES = [
+  { icon: "✝", title: "Stream anything",    desc: "YouTube, SoundCloud, Spotify links or search queries. Alfie finds it." },
+  { icon: "✝", title: "Queue control",       desc: "Add, remove, move, shuffle, loop. Full control without stopping playback." },
+  { icon: "✝", title: "Now playing",         desc: "Live progress bar with album art and track info. Always know what's on." },
+  { icon: "✝", title: "Vote skip",           desc: "Majority vote when 3+ in voice, instant if fewer. Fair by design." },
+  { icon: "✝", title: "Rave mode",           desc: "Genre sessions with automatic discovery and crossfade. Set it and go." },
+  { icon: "✝", title: "Saved playlists",     desc: "Save your queue and reload it whenever you want." },
 ];
 
 export default function LandingPage() {
-  const [inviteUrl, setInviteUrl] = useState<string>("/api/oauth/discord");
-  const [imgError, setImgError] = useState(false);
+  const [inviteUrl, setInviteUrl] = useState("/api/oauth/discord");
 
   useEffect(() => {
     fetch("/api/public/invite-url")
@@ -44,189 +52,163 @@ export default function LandingPage() {
       .catch(() => {});
   }, []);
 
-  const handleAdd = () => { window.location.href = inviteUrl; };
+  const goInvite = () => { window.location.href = inviteUrl; };
 
   return (
-    <div
-      className="min-h-screen text-[#f0ecf5]"
-      style={{
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        background: "#080008",
-      }}
-    >
-      {/* Ambient glow */}
-      <div
-        className="fixed inset-0 pointer-events-none"
-        style={{
-          background:
-            "radial-gradient(ellipse 70% 50% at 75% 0%, rgba(180,0,60,0.12) 0%, transparent 60%), radial-gradient(ellipse 40% 60% at 0% 100%, rgba(100,0,80,0.08) 0%, transparent 60%)",
-        }}
-      />
+    <div style={{ background: "#000", color: "#fff", minHeight: "100vh", fontFamily: SERIF, position: "relative", overflowX: "hidden" }}>
 
-      {/* Nav */}
-      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/[0.05] bg-[#080008]/90 backdrop-blur-md">
-        <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-          <span
-            style={{ fontFamily: "'Architex', cursive", letterSpacing: "0.05em" }}
-            className="text-lg text-white"
-          >
-            alfie
+      {/* Fishnet overlay */}
+      <div className="fixed inset-0 pointer-events-none" style={{ ...FISHNET, zIndex: 0 }} />
+
+      {/* ─── Nav ──────────────────────────────────────────── */}
+      <nav style={{
+        position: "fixed", top: 0, left: 0, right: 0, zIndex: 50,
+        background: "rgba(0,0,0,0.9)",
+        borderBottom: "1px solid rgba(255,255,255,0.12)",
+        backdropFilter: "blur(10px)",
+      }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 1.5rem", height: 52, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontFamily: BL, fontSize: "1.4rem", letterSpacing: "0.05em", lineHeight: 1 }}>
+            Alfie
           </span>
-          <button
-            onClick={handleAdd}
-            className="px-4 py-1.5 text-sm font-semibold rounded-md transition-all"
-            style={{
-              background: "rgba(200,0,50,0.85)",
-              color: "#fff",
-              border: "1px solid rgba(255,80,100,0.3)",
+          <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+            <HeartSVG size={14} opacity={0.4} />
+            <button onClick={goInvite} style={{
+              fontFamily: SERIF, fontWeight: 700, fontSize: "0.7rem",
+              letterSpacing: "0.2em", textTransform: "uppercase",
+              background: "transparent", color: "rgba(255,255,255,0.7)",
+              border: "1px solid rgba(255,255,255,0.25)", padding: "6px 16px",
+              cursor: "pointer", transition: "all 0.2s",
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(220,0,55,0.95)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(200,0,50,0.85)")}
-          >
-            Add to Discord
-          </button>
+              onMouseEnter={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "#000"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.7)"; }}
+            >
+              Add to Discord
+            </button>
+          </div>
         </div>
       </nav>
 
-      {/* Hero */}
-      <section className="relative min-h-screen flex items-center overflow-hidden">
-        {/* Misa — right side */}
-        <div
-          className="absolute right-0 bottom-0 pointer-events-none select-none"
-          style={{ width: "clamp(280px, 45vw, 560px)" }}
-        >
-          {!imgError ? (
-            <img
-              src="/misa.jpg"
-              alt="Misa Amane"
-              className="w-full h-auto object-contain object-bottom"
-              style={{
-                maxHeight: "92vh",
-                filter: "drop-shadow(0 0 40px rgba(200,0,60,0.25))",
-                maskImage: "linear-gradient(to top, transparent 0%, black 12%)",
-                WebkitMaskImage: "linear-gradient(to top, transparent 0%, black 12%)",
-              }}
-              onError={() => setImgError(true)}
-            />
-          ) : (
-            /* Fallback silhouette */
-            <div
-              className="w-full"
-              style={{
-                height: "min(92vh, 700px)",
-                background: "linear-gradient(160deg, rgba(160,0,50,0.15) 0%, transparent 60%)",
-                borderLeft: "1px solid rgba(200,0,60,0.12)",
-                maskImage: "linear-gradient(to top, transparent 0%, black 20%)",
-              }}
-            />
-          )}
-          {/* Fade edge */}
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={{
-              background:
-                "linear-gradient(to right, #080008 0%, transparent 25%), linear-gradient(to top, #080008 0%, transparent 15%)",
-            }}
-          />
+      {/* ─── Hero ─────────────────────────────────────────── */}
+      <section style={{ position: "relative", minHeight: "100vh", display: "flex", alignItems: "center", zIndex: 1 }}>
+
+        {/* Background cross watermark */}
+        <div style={{
+          position: "absolute", right: "-80px", top: "50%", transform: "translateY(-50%)",
+          pointerEvents: "none", userSelect: "none",
+        }}>
+          <CrossSVG size={520} opacity={0.04} />
         </div>
 
-        {/* Left content */}
-        <div className="relative z-10 max-w-5xl mx-auto w-full px-6 pt-28 pb-24">
-          <div className="max-w-[520px]">
-            <p
-              className="text-xs tracking-[0.25em] uppercase mb-6"
-              style={{ color: "rgba(220,60,90,0.8)" }}
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "6rem 1.5rem 4rem", width: "100%" }}>
+
+          {/* Eyebrow */}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "2rem" }}>
+            <HeartSVG size={13} opacity={0.5} />
+            <span style={{ fontFamily: SERIF, fontSize: "0.65rem", letterSpacing: "0.4em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)" }}>
+              Discord Music Bot
+            </span>
+            <HeartSVG size={13} opacity={0.5} />
+          </div>
+
+          {/* Title */}
+          <h1 style={{
+            fontFamily: BL,
+            fontSize: "clamp(5rem, 14vw, 11rem)",
+            lineHeight: 0.9,
+            color: "#fff",
+            marginBottom: "0.15em",
+            textShadow: "0 0 60px rgba(255,255,255,0.08)",
+            letterSpacing: "0.02em",
+          }}>
+            Alfie
+          </h1>
+
+          {/* Chrome Hearts rule */}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", margin: "1.5rem 0 2rem" }}>
+            <div style={{ width: 40, height: 1, background: "rgba(255,255,255,0.2)" }} />
+            <CrossSVG size={18} opacity={0.6} />
+            <div style={{ flex: 1, maxWidth: 320, height: 1, background: "rgba(255,255,255,0.2)" }} />
+          </div>
+
+          {/* Tagline */}
+          <p style={{
+            fontFamily: SERIF, fontStyle: "italic",
+            fontSize: "clamp(1rem, 2.2vw, 1.25rem)",
+            lineHeight: 1.8, color: "rgba(255,255,255,0.42)",
+            maxWidth: 480, marginBottom: "3rem",
+          }}>
+            A music bot that plays what you want and stays out of your way.
+            No opinions. No memory. No lectures.
+          </p>
+
+          {/* CTA row */}
+          <div style={{ display: "flex", alignItems: "center", gap: "1.5rem", flexWrap: "wrap" }}>
+            <button onClick={goInvite} style={{
+              fontFamily: SERIF, fontWeight: 700,
+              fontSize: "0.8rem", letterSpacing: "0.22em", textTransform: "uppercase",
+              background: "#fff", color: "#000",
+              border: "none", padding: "14px 40px",
+              cursor: "pointer", transition: "all 0.2s",
+              boxShadow: "0 0 30px rgba(255,255,255,0.12)",
+            }}
+              onMouseEnter={e => { e.currentTarget.style.background = "#e8e8e8"; e.currentTarget.style.boxShadow = "0 0 50px rgba(255,255,255,0.2)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.boxShadow = "0 0 30px rgba(255,255,255,0.12)"; }}
             >
-              Discord music bot
-            </p>
-
-            <h1
-              style={{
-                fontFamily: "'Architex', cursive",
-                lineHeight: 0.95,
-                fontSize: "clamp(5rem, 12vw, 9rem)",
-              }}
-              className="text-white mb-8 -ml-1"
-            >
-              Alfie.
-            </h1>
-
-            <p className="text-lg leading-relaxed mb-10" style={{ color: "rgba(240,220,235,0.55)" }}>
-              A music bot that plays what you want, remembers nothing embarrassing about you, and never talks back.
-              Just the queue, the vibes, and Misa holding it together.
-            </p>
-
-            <div className="flex items-center gap-3 flex-wrap">
-              <button
-                onClick={handleAdd}
-                className="px-6 py-3 text-sm font-bold rounded-lg transition-all"
-                style={{
-                  background: "rgba(200,0,50,0.9)",
-                  color: "#fff",
-                  border: "1px solid rgba(255,80,100,0.35)",
-                  boxShadow: "0 0 30px rgba(200,0,50,0.3)",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "rgba(225,0,60,1)";
-                  e.currentTarget.style.boxShadow = "0 0 45px rgba(220,0,55,0.45)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "rgba(200,0,50,0.9)";
-                  e.currentTarget.style.boxShadow = "0 0 30px rgba(200,0,50,0.3)";
-                }}
-              >
-                Add Alfie to your server
-              </button>
-              <a
-                href="/admin"
-                className="px-6 py-3 text-sm font-medium rounded-lg transition-all"
-                style={{
-                  color: "rgba(255,255,255,0.35)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.color = "rgba(255,255,255,0.65)";
-                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = "rgba(255,255,255,0.35)";
-                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)";
-                }}
-              >
-                Dashboard
-              </a>
-            </div>
-
-            <p
-              style={{ fontFamily: "'Caveat', cursive", color: "rgba(220,60,90,0.45)" }}
-              className="mt-5 text-base tracking-wide"
-            >
-              free to add. no credit card. misa approves.
-            </p>
+              Add Alfie to your server
+            </button>
+            <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: "0.8rem", color: "rgba(255,255,255,0.22)", letterSpacing: "0.06em" }}>
+              ✝ &nbsp;free &nbsp;·&nbsp; no account needed&nbsp; ✝
+            </span>
           </div>
         </div>
       </section>
 
-      {/* Divider */}
-      <div className="border-t" style={{ borderColor: "rgba(200,0,60,0.12)" }} />
+      {/* ─── Divider ──────────────────────────────────────── */}
+      <div style={{ zIndex: 1, position: "relative", display: "flex", alignItems: "center", gap: "1.25rem", padding: "0 1.5rem" }}>
+        <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
+        <CrossSVG size={16} opacity={0.3} />
+        <HeartSVG size={14} opacity={0.25} />
+        <CrossSVG size={16} opacity={0.3} />
+        <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
+      </div>
 
-      {/* Features */}
-      <section className="py-24 px-6">
-        <div className="max-w-5xl mx-auto">
-          <p className="text-xs tracking-widest uppercase mb-14" style={{ color: "rgba(220,60,90,0.6)" }}>
-            what alfie does
+      {/* ─── Features ─────────────────────────────────────── */}
+      <section style={{ position: "relative", zIndex: 1, padding: "5rem 1.5rem" }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+
+          {/* Section label */}
+          <p style={{
+            fontFamily: SERIF, fontSize: "0.6rem", letterSpacing: "0.45em",
+            textTransform: "uppercase", color: "rgba(255,255,255,0.25)",
+            marginBottom: "3rem", textAlign: "center",
+          }}>
+            ✝ &nbsp; Commands &nbsp; ✝
           </p>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-10 gap-y-10">
-            {MUSIC_FEATURES.map((f) => (
-              <div key={f.num}>
-                <p
-                  style={{ fontFamily: "'Caveat', cursive", color: "rgba(200,0,60,0.4)" }}
-                  className="text-lg mb-1.5"
-                >
-                  {f.num}
-                </p>
-                <h3 className="text-sm font-semibold text-white mb-2">{f.title}</h3>
-                <p className="text-sm leading-relaxed" style={{ color: "rgba(240,220,235,0.4)" }}>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1px", background: "rgba(255,255,255,0.08)" }}>
+            {FEATURES.map((f, i) => (
+              <div key={f.title} style={{
+                background: "#000",
+                padding: "2rem 1.75rem",
+                position: "relative",
+                ...FISHNET,
+              }}>
+                {/* Corner crosses */}
+                <div style={{ position: "absolute", top: 10, right: 10, opacity: 0.15 }}>
+                  <CrossSVG size={14} />
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "1rem" }}>
+                  <HeartSVG size={12} opacity={0.5} />
+                  <span style={{ fontFamily: SERIF, fontSize: "0.6rem", letterSpacing: "0.3em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)" }}>
+                    0{i + 1}
+                  </span>
+                </div>
+                <h3 style={{ fontFamily: BL, fontSize: "1.5rem", color: "#fff", marginBottom: "0.6rem", letterSpacing: "0.02em", lineHeight: 1.1 }}>
+                  {f.title}
+                </h3>
+                <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: "0.92rem", lineHeight: 1.75, color: "rgba(255,255,255,0.38)" }}>
                   {f.desc}
                 </p>
               </div>
@@ -235,55 +217,55 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Divider */}
-      <div className="border-t" style={{ borderColor: "rgba(200,0,60,0.12)" }} />
+      {/* ─── Inverted CTA strip ───────────────────────────── */}
+      <section style={{ position: "relative", zIndex: 1, background: "#fff", color: "#000", padding: "5rem 1.5rem", textAlign: "center", ...FISHNET }}>
+        {/* Fishnet on white — use dark lines */}
+        <div style={{
+          position: "absolute", inset: 0, pointerEvents: "none",
+          backgroundImage: `
+            repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,0.04) 5px, rgba(0,0,0,0.04) 6px),
+            repeating-linear-gradient(-45deg, transparent, transparent 5px, rgba(0,0,0,0.04) 5px, rgba(0,0,0,0.04) 6px)
+          `,
+        }} />
 
-      {/* CTA strip */}
-      <section className="py-20 px-6">
-        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-8">
-          <div>
-            <h2
-              style={{ fontFamily: "'Architex', cursive" }}
-              className="text-3xl text-white mb-2"
-            >
-              add alfie.
-            </h2>
-            <p className="text-sm" style={{ color: "rgba(240,220,235,0.35)" }}>
-              Pick a server. She'll handle the music.
-            </p>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "center", gap: "1rem", marginBottom: "1.5rem" }}>
+            <CrossSVG size={24} opacity={0.2} />
+            <HeartSVG size={22} opacity={0.18} />
+            <CrossSVG size={24} opacity={0.2} />
           </div>
-          <button
-            onClick={handleAdd}
-            className="shrink-0 px-6 py-3 text-sm font-bold rounded-lg transition-all"
-            style={{
-              background: "rgba(200,0,50,0.85)",
-              color: "#fff",
-              border: "1px solid rgba(255,80,100,0.3)",
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(220,0,55,0.95)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(200,0,50,0.85)")}
+          {/* Recolour SVGs to black in the white section */}
+          <style>{`.dark-svg svg rect, .dark-svg svg polygon, .dark-svg svg path { fill: #000 !important; }`}</style>
+
+          <h2 style={{ fontFamily: BL, fontSize: "clamp(2.5rem, 8vw, 5.5rem)", color: "#000", lineHeight: 0.95, marginBottom: "0.75rem", letterSpacing: "0.02em" }}>
+            Add Alfie.
+          </h2>
+          <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: "1rem", color: "rgba(0,0,0,0.45)", marginBottom: "2.5rem" }}>
+            Pick a server. She handles the music.
+          </p>
+          <button onClick={goInvite} style={{
+            fontFamily: SERIF, fontWeight: 700,
+            fontSize: "0.8rem", letterSpacing: "0.22em", textTransform: "uppercase",
+            background: "#000", color: "#fff",
+            border: "none", padding: "14px 44px",
+            cursor: "pointer", transition: "all 0.2s",
+          }}
+            onMouseEnter={e => { e.currentTarget.style.background = "#1a1a1a"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "#000"; }}
           >
             Get started →
           </button>
         </div>
       </section>
 
-      {/* Footer */}
-      <div className="border-t" style={{ borderColor: "rgba(200,0,60,0.08)" }} />
-      <footer className="py-7 px-6">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <span
-            style={{ fontFamily: "'Caveat', cursive", color: "rgba(240,220,235,0.2)" }}
-            className="text-base"
-          >
-            alfie. your discord DJ.
+      {/* ─── Footer ───────────────────────────────────────── */}
+      <footer style={{ position: "relative", zIndex: 1, borderTop: "1px solid rgba(255,255,255,0.08)", padding: "1.75rem 1.5rem" }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "center", gap: "1rem" }}>
+          <CrossSVG size={12} opacity={0.2} />
+          <span style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: "0.75rem", color: "rgba(255,255,255,0.2)", letterSpacing: "0.1em" }}>
+            alfie · your discord dj
           </span>
-          <a href="/admin" className="text-xs transition-colors" style={{ color: "rgba(240,220,235,0.2)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(240,220,235,0.5)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(240,220,235,0.2)")}
-          >
-            Admin
-          </a>
+          <CrossSVG size={12} opacity={0.2} />
         </div>
       </footer>
     </div>
