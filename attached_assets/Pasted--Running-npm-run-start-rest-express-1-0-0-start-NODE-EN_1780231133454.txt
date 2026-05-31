@@ -1,0 +1,37 @@
+==> Running 'npm run start'
+> rest-express@1.0.0 start
+> NODE_ENV=production node dist/index.cjs
+12:36:56 PM [express] serving on port 10000
+12:36:56 PM [alfie] [Alfie] Attempting Discord login…
+12:36:56 PM [keep-alive] Keep-alive active → pinging https://alfie-yql7.onrender.com/health every 10 min
+12:36:57 PM [alfie] [Alfie] Logged in as Alfie#6226
+12:36:57 PM [discord] [Music] Initialising Lavalink with nodes: jirayu-ssl, jirayu, serenetia-v4, serenetia-universal, ajieblogs, millohost, triniumhost-ssl, triniumhost, nyxbot-sg1, nyxbot-sg2
+(node:83) DeprecationWarning: The ready event has been renamed to clientReady to distinguish it from the gateway READY event and will only emit under that name in v15. Please use clientReady instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+12:36:58 PM [alfie] [Alfie] Slash commands registered in Dumpster Fire
+12:36:58 PM [discord] [Music] Lavalink node "jirayu" connected.
+12:36:58 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+12:36:58 PM [discord] [Music] Lavalink node "serenetia-universal" connected.
+12:36:58 PM [discord] [Music] Lavalink node "serenetia-v4" connected.
+12:36:58 PM [discord] [Music] Lavalink node "ajieblogs" error: certificate has expired
+12:36:58 PM [discord] [Music] Lavalink node "nyxbot-sg1" connected.
+12:36:58 PM [discord] [Music] Lavalink node "nyxbot-sg2" connected.
+12:36:58 PM [discord] [Music] Lavalink node "triniumhost" connected.
+12:36:58 PM [discord] [Music] Lavalink node "millohost" connected.
+12:36:59 PM [discord] [Music] Lavalink node "triniumhost-ssl" connected.
+12:36:59 PM [alfie] [Alfie] Discord client error: Interaction has already been acknowledged.
+12:37:02 PM [alfie] [Alfie] Discord client error: Interaction has already been acknowledged.
+12:37:03 PM [discord] [Music] Lavalink node "ajieblogs" error: certificate has expired
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://alfie-yql7.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+12:37:09 PM [discord] [Music] Lavalink node "ajieblogs" error: certificate has expired
+12:37:14 PM [discord] [Music] Lavalink node "ajieblogs" error: certificate has expired
+12:37:19 PM [discord] [Music] Lavalink node "ajieblogs" error: certificate has expired
+12:37:24 PM [discord] [Music] Lavalink node "ajieblogs" error: Websocket closed before a connection was established
+12:37:58 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+12:37:58 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
