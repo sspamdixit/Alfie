@@ -369,14 +369,14 @@ async function requestSkip(c: Client, guildId: string, userId: string): Promise<
 
 function formatSkipReply(r: SkipResult): string {
   switch (r.kind) {
-    case "nothing-playing":   return "nothing is playing.";
-    case "not-in-channel":    return "join the voice channel i'm in if you wanna vote to skip.";
-    case "already-voted":     return `you already voted to skip. **${r.votes}/${r.needed}** votes so far.`;
-    case "voted":             return `🗳  vote registered — **${r.votes}/${r.needed}** votes to skip.`;
+    case "nothing-playing":   return "nothing's playing right now~ hehe";
+    case "not-in-channel":    return "you have to join the voice channel to vote~ ehehe";
+    case "already-voted":     return `you already voted to skip~ **${r.votes}/${r.needed}** votes so far ♡`;
+    case "voted":             return `🗳 vote counted~! **${r.votes}/${r.needed}** votes to skip ♡`;
     case "skipped":
       return r.votes != null && r.needed != null && (r.listeners ?? 0) > 2
-        ? `⏭  Skipped **${r.skippedTitle ?? "track"}** (${r.votes}/${r.needed} votes).`
-        : `⏭  Skipped **${r.skippedTitle ?? "track"}**.`;
+        ? `⏭ skipped **${r.skippedTitle ?? "track"}** (${r.votes}/${r.needed} votes)~!`
+        : `⏭ skipped **${r.skippedTitle ?? "track"}**~!`;
   }
 }
 
@@ -582,26 +582,26 @@ export async function startAlfie(): Promise<void> {
         const hist = trackHistory.get(guildId);
         const prev = hist?.[1];
         if (!prev) {
-          await interaction.reply({ content: "no track history to go back to.", ephemeral: true });
+          await interaction.reply({ content: "no history to go back to~ hehe", ephemeral: true });
           return;
         }
         if (!q) {
-          await interaction.reply({ content: "nothing playing right now.", ephemeral: true });
+          await interaction.reply({ content: "nothing's playing right now~ hehe", ephemeral: true });
           return;
         }
         const member = interaction.guild?.members.cache.get(interaction.user.id);
         if (!member?.voice?.channelId) {
-          await interaction.reply({ content: "join a voice channel first.", ephemeral: true });
+          await interaction.reply({ content: "join a voice channel first~ ehehe", ephemeral: true });
           return;
         }
         await interaction.deferUpdate();
         try {
           const track = await resolveTrack(prev.uri, interaction.user.username);
-          if (!track) { await interaction.followUp({ content: "couldn't resolve that track.", ephemeral: true }); return; }
+          if (!track) { await interaction.followUp({ content: "couldn't find that track~ sorry ♡", ephemeral: true }); return; }
           await addToFront(guildId, q.voiceChannelId, q.textChannelId, track, interaction.guild?.shardId ?? 0);
           await skipTrack(guildId);
         } catch (err: any) {
-          await interaction.followUp({ content: `back failed: ${err.message}`, ephemeral: true });
+          await interaction.followUp({ content: `back went oopsie~ ${err.message}`, ephemeral: true });
         }
         return;
       }
@@ -679,8 +679,8 @@ export async function startAlfie(): Promise<void> {
 
     if (commandName === "ping") {
       const start = Date.now();
-      await interaction.reply({ content: "pong.", allowedMentions: { parse: [] } });
-      await interaction.editReply(`pong. roundtrip: **${Date.now() - start}ms** | ws: **${client?.ws.ping ?? -1}ms**`);
+      await interaction.reply({ content: "pong~! ♡", allowedMentions: { parse: [] } });
+      await interaction.editReply(`pong~! roundtrip: **${Date.now() - start}ms** · ws: **${client?.ws.ping ?? -1}ms** ♡`);
       return;
     }
 
@@ -688,7 +688,7 @@ export async function startAlfie(): Promise<void> {
       const uptime = botState.uptimeStart ? Math.floor((Date.now() - botState.uptimeStart) / 1000) : null;
       const uptimeStr = uptime != null ? `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${uptime % 60}s` : "unknown";
       await interaction.reply({
-        content: [`**alfie status**`, `online: yes`, `uptime: ${uptimeStr}`, `servers: ${botState.guildCount}`].join("\n"),
+        content: [`**alfie status~ ♡**`, `online: yes~!`, `uptime: ${uptimeStr}`, `servers: ${botState.guildCount}`].join("\n"),
         allowedMentions: { parse: [] },
       });
       return;
@@ -697,7 +697,7 @@ export async function startAlfie(): Promise<void> {
     if (commandName === "help") {
       await interaction.reply({
         content: [
-          "**alfie — music commands**",
+          "**alfie — music commands~ ♡**",
           "",
           "**playback**",
           "`/play <query>` — play a song or playlist",
@@ -711,7 +711,7 @@ export async function startAlfie(): Promise<void> {
           "",
           "**queue**",
           "`/queue` — show the queue",
-          "`/nowplaying` — show current track",
+          "`/nowplaying` — show what's playing~",
           "`/history` — recently played tracks",
           "`/shuffle` — shuffle the queue",
           "`/loop` — cycle loop mode (off → track → queue)",
@@ -721,7 +721,7 @@ export async function startAlfie(): Promise<void> {
           "`/clear` — clear the queue",
           "`/autoplay` — toggle autoplay",
           "",
-          "**extras**",
+          "**extras~**",
           "`/lyrics [song]` — fetch lyrics",
           "`/savequeue <name>` — save the queue as a playlist",
           "`/playlist list/load/delete` — manage playlists",
@@ -735,19 +735,19 @@ export async function startAlfie(): Promise<void> {
     }
 
     // All music commands require a guild
-    if (!guildId) { await replyEph("music only works in servers."); return; }
+    if (!guildId) { await replyEph("music only works in servers~ sorry ♡"); return; }
 
     if (commandName === "play") {
       const query = interaction.options.getString("query", true);
       const member = interaction.guild?.members.cache.get(interaction.user.id);
       const voiceChannel = member?.voice?.channel;
-      if (!voiceChannel) { await replyEph("join a voice channel first."); return; }
+      if (!voiceChannel) { await replyEph("join a voice channel first~ ehehe"); return; }
       await interaction.deferReply();
       try {
         const isUrl = /^https?:\/\//i.test(query);
         if (isUrl) {
           const { tracks, playlistName } = await resolvePlaylist(query, interaction.user.username);
-          if (!tracks.length) { await interaction.editReply({ content: "couldn't find anything. try a different link.", allowedMentions: { parse: [] } }); return; }
+          if (!tracks.length) { await interaction.editReply({ content: "couldn't find anything there~ try a different link?", allowedMentions: { parse: [] } }); return; }
           if (tracks.length === 1) {
             const result = await joinAndPlay(guildId, voiceChannel.id, interaction.channelId, tracks[0], interaction.guild?.shardId ?? 0);
             if (result === "playing") {
@@ -756,15 +756,15 @@ export async function startAlfie(): Promise<void> {
               scheduleNowPlayingProgressUpdates(sent, guildId, tracks[0]);
             } else {
               const dur = tracks[0].isStream ? "LIVE" : formatDuration(tracks[0].duration);
-              await interaction.editReply({ content: `queued: **${tracks[0].title}** by ${tracks[0].author} [${dur}]`, allowedMentions: { parse: [] } });
+              await interaction.editReply({ content: `added **${tracks[0].title}** by ${tracks[0].author} [${dur}] to the queue~! ♡`, allowedMentions: { parse: [] } });
             }
           } else {
             const result = await joinAndPlayMultiple(guildId, voiceChannel.id, interaction.channelId, tracks, interaction.guild?.shardId ?? 0);
-            await interaction.editReply({ content: result === "playing" ? `playing playlist **${playlistName ?? "untitled"}** — ${tracks.length} tracks loaded.` : `queued playlist **${playlistName ?? "untitled"}** — ${tracks.length} tracks added.`, allowedMentions: { parse: [] } });
+            await interaction.editReply({ content: result === "playing" ? `playing playlist **${playlistName ?? "untitled"}**~ ${tracks.length} tracks loaded yay~! ♡` : `queued playlist **${playlistName ?? "untitled"}**~ ${tracks.length} tracks added ♡`, allowedMentions: { parse: [] } });
           }
         } else {
           const track = await resolveTrack(query, interaction.user.username);
-          if (!track) { await interaction.editReply({ content: "couldn't find that. try a different search.", allowedMentions: { parse: [] } }); return; }
+          if (!track) { await interaction.editReply({ content: "couldn't find that~ try something else?", allowedMentions: { parse: [] } }); return; }
           const result = await joinAndPlay(guildId, voiceChannel.id, interaction.channelId, track, interaction.guild?.shardId ?? 0);
           if (result === "playing") {
             const q = getQueue(guildId)!;
@@ -772,12 +772,12 @@ export async function startAlfie(): Promise<void> {
             scheduleNowPlayingProgressUpdates(sent, guildId, track);
           } else {
             const dur = track.isStream ? "LIVE" : formatDuration(track.duration);
-            await interaction.editReply({ content: `queued: **${track.title}** by ${track.author} [${dur}]`, allowedMentions: { parse: [] } });
+            await interaction.editReply({ content: `added **${track.title}** by ${track.author} [${dur}] to the queue~! ♡`, allowedMentions: { parse: [] } });
           }
         }
       } catch (err: any) {
         log(`[Alfie/slash:play] ${err.message}`, "alfie");
-        await interaction.editReply({ content: `music error: ${err.message}`, allowedMentions: { parse: [] } });
+        await interaction.editReply({ content: `oopsie~ music went boom: ${err.message}`, allowedMentions: { parse: [] } });
       }
       return;
     }
@@ -786,11 +786,11 @@ export async function startAlfie(): Promise<void> {
       const query = interaction.options.getString("query", true);
       const member = interaction.guild?.members.cache.get(interaction.user.id);
       const voiceChannel = member?.voice?.channel;
-      if (!voiceChannel) { await replyEph("join a voice channel first."); return; }
+      if (!voiceChannel) { await replyEph("join a voice channel first~ ehehe"); return; }
       await interaction.deferReply();
       try {
         const track = await resolveTrack(query, interaction.user.username);
-        if (!track) { await interaction.editReply({ content: "couldn't find that.", allowedMentions: { parse: [] } }); return; }
+        if (!track) { await interaction.editReply({ content: "couldn't find that~ try something else?", allowedMentions: { parse: [] } }); return; }
         const result = await addToFront(guildId, voiceChannel.id, interaction.channelId, track, interaction.guild?.shardId ?? 0);
         if (result === "playing") {
           const q = getQueue(guildId)!;
@@ -798,10 +798,10 @@ export async function startAlfie(): Promise<void> {
           scheduleNowPlayingProgressUpdates(sent, guildId, track);
         } else {
           const dur = track.isStream ? "LIVE" : formatDuration(track.duration);
-          await interaction.editReply({ content: `added to top of queue: **${track.title}** by ${track.author} [${dur}]`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: `added **${track.title}** to the top of the queue~! ♡`, allowedMentions: { parse: [] } });
         }
       } catch (err: any) {
-        await interaction.editReply({ content: `music error: ${err.message}`, allowedMentions: { parse: [] } });
+        await interaction.editReply({ content: `oopsie~ music went boom: ${err.message}`, allowedMentions: { parse: [] } });
       }
       return;
     }
@@ -812,7 +812,7 @@ export async function startAlfie(): Promise<void> {
         const result = await requestSkip(client!, guildId, interaction.user.id);
         await interaction.reply({ content: formatSkipReply(result), allowedMentions: { parse: [] } });
       } catch (err: any) {
-        await replyEph(`skip failed: ${err.message}`);
+        await replyEph(`skip went oopsie~ ${err.message}`);
       }
       return;
     }
@@ -821,9 +821,9 @@ export async function startAlfie(): Promise<void> {
       try {
         onDjStop(guildId);
         const stopped = await stopMusic(guildId);
-        await interaction.reply({ content: stopped ? "stopped and disconnected." : "i wasn't even playing anything.", allowedMentions: { parse: [] } });
+        await interaction.reply({ content: stopped ? "stopped~! see you soon ♡" : "i wasn't even playing anything~ ehehe", allowedMentions: { parse: [] } });
       } catch (err: any) {
-        await replyEph(`stop failed: ${err.message}`);
+        await replyEph(`stop went oopsie~ ${err.message}`);
       }
       return;
     }
@@ -831,9 +831,9 @@ export async function startAlfie(): Promise<void> {
     if (commandName === "disconnect") {
       try {
         const done = await disconnectMusic(guildId);
-        await interaction.reply({ content: done ? "disconnected." : "i'm not in a voice channel.", allowedMentions: { parse: [] } });
+        await interaction.reply({ content: done ? "disconnected~! byebye ♡" : "i'm not even in a voice channel~ hehe", allowedMentions: { parse: [] } });
       } catch (err: any) {
-        await replyEph(`disconnect failed: ${err.message}`);
+        await replyEph(`disconnect went oopsie~ ${err.message}`);
       }
       return;
     }
@@ -845,12 +845,12 @@ export async function startAlfie(): Promise<void> {
         if (result.ok) {
           const where = result.trackTitle ? `resumed **${result.trackTitle}**${result.resumedAt > 0 ? ` at ${formatDuration(result.resumedAt)}` : ""}` : "queue is empty, but reconnected";
           const node = result.nodeName ? ` (now on \`${result.nodeName}\`)` : "";
-          await interaction.editReply({ content: `reconnected to a fresh node${node} — ${where}.`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: `reconnected to a fresh node${node}~ ${where} ♡`, allowedMentions: { parse: [] } });
         } else {
-          await interaction.editReply({ content: `reconnect failed: ${result.message}`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: `reconnect went oopsie~ ${result.message}`, allowedMentions: { parse: [] } });
         }
       } catch (err: any) {
-        await interaction.editReply({ content: `reconnect failed: ${err.message}`, allowedMentions: { parse: [] } });
+        await interaction.editReply({ content: `reconnect went oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
       }
       return;
     }
@@ -858,36 +858,36 @@ export async function startAlfie(): Promise<void> {
     if (commandName === "pause") {
       try {
         const paused = await pauseMusic(guildId);
-        await interaction.reply({ content: paused ? "paused." : "nothing to pause.", allowedMentions: { parse: [] } });
-      } catch (err: any) { await replyEph(`pause failed: ${err.message}`); }
+        await interaction.reply({ content: paused ? "paused~! ♡" : "nothing to pause~ hehe", allowedMentions: { parse: [] } });
+      } catch (err: any) { await replyEph(`pause went oopsie~ ${err.message}`); }
       return;
     }
 
     if (commandName === "resume") {
       try {
         const resumed = await resumeMusic(guildId);
-        await interaction.reply({ content: resumed ? "resumed." : "nothing to resume.", allowedMentions: { parse: [] } });
-      } catch (err: any) { await replyEph(`resume failed: ${err.message}`); }
+        await interaction.reply({ content: resumed ? "resumed~! ♡" : "nothing to resume~ hehe", allowedMentions: { parse: [] } });
+      } catch (err: any) { await replyEph(`resume went oopsie~ ${err.message}`); }
       return;
     }
 
     if (commandName === "queue") {
       const q = getQueue(guildId);
-      if (!q || (!q.current && q.tracks.length === 0)) { await interaction.reply({ content: "queue is empty.", allowedMentions: { parse: [] } }); return; }
+      if (!q || (!q.current && q.tracks.length === 0)) { await interaction.reply({ content: "the queue's empty right now~ add something ♡", allowedMentions: { parse: [] } }); return; }
       const lines: string[] = [];
       if (q.current) {
         const dur = q.current.isStream ? "LIVE" : formatDuration(q.current.duration);
         const pos = formatDuration(q.player.position);
         const loopLabel = q.loop !== "none" ? ` | loop: ${q.loop}` : "";
-        lines.push(`**now playing:** ${q.current.title} [${pos}/${dur}] — req by ${q.current.requestedBy}${loopLabel}`);
+        lines.push(`**now playing~** ${q.current.title} [${pos}/${dur}] — req by ${q.current.requestedBy}${loopLabel}`);
       }
       if (q.tracks.length > 0) {
-        lines.push("", "**up next:**");
+        lines.push("", "**up next~**");
         q.tracks.slice(0, 10).forEach((t, i) => {
           const dur = t.isStream ? "LIVE" : formatDuration(t.duration);
           lines.push(`${i + 1}. ${t.title} [${dur}] — req by ${t.requestedBy}`);
         });
-        if (q.tracks.length > 10) lines.push(`…and ${q.tracks.length - 10} more`);
+        if (q.tracks.length > 10) lines.push(`…and ${q.tracks.length - 10} more~ ♡`);
       }
       await interaction.reply({ content: lines.join("\n"), allowedMentions: { parse: [] } });
       return;
@@ -895,7 +895,7 @@ export async function startAlfie(): Promise<void> {
 
     if (commandName === "nowplaying") {
       const q = getQueue(guildId);
-      if (!q?.current) { await interaction.reply({ content: "nothing is playing right now.", allowedMentions: { parse: [] } }); return; }
+      if (!q?.current) { await interaction.reply({ content: "nothing's playing right now~ hehe", allowedMentions: { parse: [] } }); return; }
       await interaction.deferReply();
       const sent = await interaction.editReply({ embeds: [await buildNowPlayingEmbed(q.current, q)], components: [buildMusicButtons(q.player.paused)], allowedMentions: { parse: [] } });
       scheduleNowPlayingProgressUpdates(sent, guildId, q.current);
@@ -906,38 +906,38 @@ export async function startAlfie(): Promise<void> {
       const level = interaction.options.getInteger("level", true);
       try {
         const ok = await setMusicVolume(guildId, level);
-        await interaction.reply({ content: ok ? `volume set to ${level}%.` : "nothing is playing.", allowedMentions: { parse: [] } });
-      } catch (err: any) { await replyEph(`volume failed: ${err.message}`); }
+        await interaction.reply({ content: ok ? `volume set to **${level}%**~! ♡` : "nothing's playing~ hehe", allowedMentions: { parse: [] } });
+      } catch (err: any) { await replyEph(`volume went oopsie~ ${err.message}`); }
       return;
     }
 
     if (commandName === "shuffle") {
       const ok = shuffleQueue(guildId);
-      await interaction.reply({ content: ok ? "queue shuffled." : "nothing in the queue to shuffle.", allowedMentions: { parse: [] } });
+      await interaction.reply({ content: ok ? "shuffled the queue~! ehehe ♡" : "nothing to shuffle~ add some songs first!", allowedMentions: { parse: [] } });
       return;
     }
 
     if (commandName === "loop") {
       const mode = cycleLoop(guildId);
-      await interaction.reply({ content: mode != null ? `loop mode: **${mode}**` : "nothing is playing.", allowedMentions: { parse: [] } });
+      await interaction.reply({ content: mode != null ? `loop is now **${mode}**~! ♡` : "nothing's playing~ hehe", allowedMentions: { parse: [] } });
       return;
     }
 
     if (commandName === "seek") {
       const timeStr = interaction.options.getString("time", true);
       const ms = parseSeekTime(timeStr);
-      if (ms === null) { await replyEph("invalid time format. use `1:30` or `90`."); return; }
+      if (ms === null) { await replyEph("invalid time~ try something like `1:30` or `90`!"); return; }
       try {
         const ok = await seekTrack(guildId, ms);
-        await interaction.reply({ content: ok ? `seeked to ${formatDuration(ms)}.` : "nothing is playing.", allowedMentions: { parse: [] } });
-      } catch (err: any) { await replyEph(`seek failed: ${err.message}`); }
+        await interaction.reply({ content: ok ? `seeked to **${formatDuration(ms)}**~! ♡` : "nothing's playing~ hehe", allowedMentions: { parse: [] } });
+      } catch (err: any) { await replyEph(`seek went oopsie~ ${err.message}`); }
       return;
     }
 
     if (commandName === "remove") {
       const pos = interaction.options.getInteger("position", true);
       const removed = removeTrack(guildId, pos - 1);
-      await interaction.reply({ content: removed ? `removed **${removed.title}** from the queue.` : "invalid position.", allowedMentions: { parse: [] } });
+      await interaction.reply({ content: removed ? `removed **${removed.title}** from the queue~!` : "that position doesn't exist~ hehe", allowedMentions: { parse: [] } });
       return;
     }
 
@@ -945,20 +945,20 @@ export async function startAlfie(): Promise<void> {
       const from = interaction.options.getInteger("from", true);
       const to = interaction.options.getInteger("to", true);
       const ok = moveTrack(guildId, from - 1, to - 1);
-      await interaction.reply({ content: ok ? `moved track from position ${from} to ${to}.` : "invalid positions.", allowedMentions: { parse: [] } });
+      await interaction.reply({ content: ok ? `moved it from **${from}** to **${to}**~! ♡` : "those positions don't look right~ hehe", allowedMentions: { parse: [] } });
       return;
     }
 
     if (commandName === "clear") {
       const count = clearQueue(guildId);
-      await interaction.reply({ content: count > 0 ? `cleared ${count} track${count !== 1 ? "s" : ""} from the queue.` : "queue was already empty.", allowedMentions: { parse: [] } });
+      await interaction.reply({ content: count > 0 ? `cleared **${count}** track${count !== 1 ? "s" : ""} from the queue~!` : "queue was already empty~ hehe", allowedMentions: { parse: [] } });
       return;
     }
 
     if (commandName === "autoplay") {
       const enabled = interaction.options.getBoolean("enabled", false);
       const newState = enabled != null ? setAutoplay(guildId, enabled) : setAutoplay(guildId, !isAutoplayEnabled(guildId));
-      await interaction.reply({ content: `autoplay is now **${newState ? "on" : "off"}**.`, allowedMentions: { parse: [] } });
+      await interaction.reply({ content: `autoplay is now **${newState ? "on" : "off"}**~! ♡`, allowedMentions: { parse: [] } });
       return;
     }
 
@@ -974,12 +974,12 @@ export async function startAlfie(): Promise<void> {
           else { artist = ""; title = songOpt; }
         } else {
           const q = getQueue(guildId);
-          if (!q?.current) { await interaction.editReply({ content: "nothing is playing. specify a song with `/lyrics artist - title`.", allowedMentions: { parse: [] } }); return; }
+          if (!q?.current) { await interaction.editReply({ content: "nothing's playing~ try `/lyrics artist - title` to specify a song!", allowedMentions: { parse: [] } }); return; }
           artist = q.current.author;
           title = q.current.title;
         }
         const lyrics = await fetchLyrics(artist, title);
-        if (!lyrics) { await interaction.editReply({ content: `couldn't find lyrics for **${title}**${artist ? ` by ${artist}` : ""}.`, allowedMentions: { parse: [] } }); return; }
+        if (!lyrics) { await interaction.editReply({ content: `couldn't find lyrics for **${title}**${artist ? ` by ${artist}` : ""}~ sorry ♡`, allowedMentions: { parse: [] } }); return; }
         const chunks = lyrics.match(/[\s\S]{1,1900}/g) ?? [];
         const header = `**${title}**${artist ? `\nby ${artist}` : ""}\n\n`;
         await interaction.editReply({ content: header + chunks[0], allowedMentions: { parse: [] } });
@@ -987,21 +987,21 @@ export async function startAlfie(): Promise<void> {
           await interaction.followUp({ content: chunk, allowedMentions: { parse: [] } });
         }
       } catch (err: any) {
-        await interaction.editReply({ content: `lyrics fetch failed: ${err.message}`, allowedMentions: { parse: [] } });
+        await interaction.editReply({ content: `lyrics went oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
       }
       return;
     }
 
     if (commandName === "history") {
       const hist = trackHistory.get(guildId);
-      if (!hist || hist.length === 0) { await interaction.reply({ content: "no track history this session.", allowedMentions: { parse: [] } }); return; }
+      if (!hist || hist.length === 0) { await interaction.reply({ content: "no history yet this session~ hehe", allowedMentions: { parse: [] } }); return; }
       const lines = hist.slice(0, 15).map((t, i) => {
         const dur = formatDuration(t.duration);
         const ago = Math.floor((Date.now() - t.playedAt) / 60_000);
         const agoStr = ago < 1 ? "just now" : `${ago}m ago`;
         return `${i + 1}. **${t.title}** — ${t.author} [${dur}] (${agoStr})`;
       });
-      await interaction.reply({ content: `**recently played:**\n${lines.join("\n")}`, allowedMentions: { parse: [] } });
+      await interaction.reply({ content: `**recently played~**\n${lines.join("\n")}`, allowedMentions: { parse: [] } });
       return;
     }
 
@@ -1009,16 +1009,16 @@ export async function startAlfie(): Promise<void> {
       const name = interaction.options.getString("name", true).trim();
       const q = getQueue(guildId);
       const tracks = q ? [q.current, ...q.tracks].filter(Boolean) as QueueTrack[] : [];
-      if (!tracks.length) { await replyEph("queue is empty — nothing to save."); return; }
+      if (!tracks.length) { await replyEph("the queue's empty~ nothing to save hehe"); return; }
       await interaction.deferReply();
       try {
         const existing = await storage.getPlaylist(interaction.user.id, guildId, name);
         let pl = existing;
         if (!pl) pl = await storage.createPlaylist(interaction.user.id, guildId, name);
         await storage.setPlaylistTracks(pl.id, tracks.map((t, i) => ({ position: i, encoded: t.encoded, title: t.title, author: t.author, uri: t.uri, duration: t.duration, artworkUrl: t.artworkUrl ?? null })));
-        await interaction.editReply({ content: `saved **${tracks.length}** track${tracks.length !== 1 ? "s" : ""} as playlist **${name}**.`, allowedMentions: { parse: [] } });
+        await interaction.editReply({ content: `saved **${tracks.length}** track${tracks.length !== 1 ? "s" : ""} as **${name}**~! ♡`, allowedMentions: { parse: [] } });
       } catch (err: any) {
-        await interaction.editReply({ content: `savequeue failed: ${err.message}`, allowedMentions: { parse: [] } });
+        await interaction.editReply({ content: `savequeue went oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
       }
       return;
     }
@@ -1029,11 +1029,11 @@ export async function startAlfie(): Promise<void> {
         await interaction.deferReply();
         try {
           const lists = await storage.getPlaylists(interaction.user.id, guildId);
-          if (!lists.length) { await interaction.editReply({ content: "you have no saved playlists in this server.", allowedMentions: { parse: [] } }); return; }
+          if (!lists.length) { await interaction.editReply({ content: "no saved playlists here yet~ hehe", allowedMentions: { parse: [] } }); return; }
           const lines = lists.map((p) => `• **${p.name}**`);
-          await interaction.editReply({ content: `**your playlists:**\n${lines.join("\n")}`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: `**your playlists~**\n${lines.join("\n")}`, allowedMentions: { parse: [] } });
         } catch (err: any) {
-          await interaction.editReply({ content: `playlist list failed: ${err.message}`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: `couldn't load playlists~ ${err.message}`, allowedMentions: { parse: [] } });
         }
         return;
       }
@@ -1042,22 +1042,22 @@ export async function startAlfie(): Promise<void> {
         const name = interaction.options.getString("name", true).trim();
         const member = interaction.guild?.members.cache.get(interaction.user.id);
         const voiceChannel = member?.voice?.channel;
-        if (!voiceChannel) { await replyEph("join a voice channel first."); return; }
+        if (!voiceChannel) { await replyEph("join a voice channel first~ ehehe"); return; }
         await interaction.deferReply();
         try {
           const pl = await storage.getPlaylist(interaction.user.id, guildId, name);
-          if (!pl) { await interaction.editReply({ content: `no playlist named **${name}** found.`, allowedMentions: { parse: [] } }); return; }
+          if (!pl) { await interaction.editReply({ content: `couldn't find a playlist called **${name}**~ hehe`, allowedMentions: { parse: [] } }); return; }
           const rows = await storage.getPlaylistTracks(pl.id);
-          if (!rows.length) { await interaction.editReply({ content: `playlist **${name}** is empty.`, allowedMentions: { parse: [] } }); return; }
+          if (!rows.length) { await interaction.editReply({ content: `**${name}** is empty~ nothing to load hehe`, allowedMentions: { parse: [] } }); return; }
           const tracks: QueueTrack[] = rows.map((r) => ({
             encoded: r.encoded, title: r.title, author: r.author, uri: r.uri,
             duration: r.duration, isStream: false, requestedBy: interaction.user.username,
             artworkUrl: r.artworkUrl ?? null,
           }));
           const result = await joinAndPlayMultiple(guildId, voiceChannel.id, interaction.channelId, tracks, interaction.guild?.shardId ?? 0);
-          await interaction.editReply({ content: result === "playing" ? `playing playlist **${name}** — ${tracks.length} tracks loaded.` : `queued playlist **${name}** — ${tracks.length} tracks added.`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: result === "playing" ? `playing playlist **${name}**~ ${tracks.length} tracks loaded yay~! ♡` : `queued playlist **${name}**~ ${tracks.length} tracks added ♡`, allowedMentions: { parse: [] } });
         } catch (err: any) {
-          await interaction.editReply({ content: `playlist load failed: ${err.message}`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: `playlist load went oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
         }
         return;
       }
@@ -1067,9 +1067,9 @@ export async function startAlfie(): Promise<void> {
         await interaction.deferReply();
         try {
           const deleted = await storage.deletePlaylist(interaction.user.id, guildId, name);
-          await interaction.editReply({ content: deleted ? `deleted playlist **${name}**.` : `no playlist named **${name}** found.`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: deleted ? `deleted **${name}** from your playlists~!` : `couldn't find a playlist called **${name}**~ hehe`, allowedMentions: { parse: [] } });
         } catch (err: any) {
-          await interaction.editReply({ content: `playlist delete failed: ${err.message}`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: `delete went oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
         }
         return;
       }
@@ -1081,12 +1081,12 @@ export async function startAlfie(): Promise<void> {
       const minutes = interaction.options.getInteger("minutes", false);
       const member = interaction.guild?.members.cache.get(interaction.user.id);
       const voiceChannel = member?.voice?.channel;
-      if (!voiceChannel) { await replyEph("join a voice channel first."); return; }
+      if (!voiceChannel) { await replyEph("join a voice channel first~ ehehe"); return; }
       await interaction.deferReply();
       try {
         const existing = djSessions.get(guildId);
         if (existing) {
-          await interaction.editReply({ content: `a **${existing.genre}** rave is already running. use \`/ravestop\` first.`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: `there's already a **${existing.genre}** rave running~! use \`/ravestop\` first ♡`, allowedMentions: { parse: [] } });
           return;
         }
         const session = {
@@ -1106,12 +1106,12 @@ export async function startAlfie(): Promise<void> {
         await refillDjQueue(guildId, session);
         const durationStr = minutes ? ` for ${minutes} minute${minutes !== 1 ? "s" : ""}` : " indefinitely";
         await interaction.editReply({
-          content: `🎉 rave started! playing **${genre}**${durationStr}.\nvibe vote embeds will appear as tracks play. use \`/ravestop\` to end.`,
+          content: `🎉 rave started~! playing **${genre}**${durationStr} ♡\nvibe vote embeds will pop up as tracks play~ use \`/ravestop\` to end!`,
           allowedMentions: { parse: [] },
         });
       } catch (err: any) {
         djSessions.delete(guildId);
-        await interaction.editReply({ content: `rave failed to start: ${err.message}`, allowedMentions: { parse: [] } });
+        await interaction.editReply({ content: `rave went oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
       }
       return;
     }
@@ -1119,7 +1119,7 @@ export async function startAlfie(): Promise<void> {
     if (commandName === "ravestop") {
       onDjStop(guildId);
       const stopped = await stopMusic(guildId);
-      await interaction.reply({ content: stopped ? "rave stopped. recap sent above." : "no rave was running.", allowedMentions: { parse: [] } });
+      await interaction.reply({ content: stopped ? "rave stopped~! recap's above ♡" : "no rave was running~ hehe", allowedMentions: { parse: [] } });
       return;
     }
 
@@ -1127,17 +1127,17 @@ export async function startAlfie(): Promise<void> {
       const text = interaction.options.getString("text", true).trim();
       const member = interaction.guild?.members.cache.get(interaction.user.id);
       const voiceChannel = member?.voice?.channel;
-      if (!voiceChannel) { await replyEph("join a voice channel first."); return; }
+      if (!voiceChannel) { await replyEph("join a voice channel first~ ehehe"); return; }
       await interaction.deferReply();
       try {
         const result = await speakInVoice(guildId, text, voiceChannel.id, interaction.channelId, interaction.guild?.shardId ?? 0, interaction.user.username);
         if (result.ok) {
-          await interaction.editReply({ content: `🔊 speaking: *"${text.slice(0, 100)}${text.length > 100 ? "…" : ""}"*`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: `🔊 speaking~: *"${text.slice(0, 100)}${text.length > 100 ? "…" : ""}"* ♡`, allowedMentions: { parse: [] } });
         } else {
-          await interaction.editReply({ content: `tts failed: ${result.reason ?? "unknown error"}`, allowedMentions: { parse: [] } });
+          await interaction.editReply({ content: `oopsie, couldn't speak~ ${result.reason ?? "unknown error"}`, allowedMentions: { parse: [] } });
         }
       } catch (err: any) {
-        await interaction.editReply({ content: `tts blew up: ${err.message}`, allowedMentions: { parse: [] } });
+        await interaction.editReply({ content: `tts went oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
       }
       return;
     }
@@ -1170,7 +1170,7 @@ export async function startAlfie(): Promise<void> {
           autoPausedGuilds.delete(guildId);
           await resumeMusic(guildId);
           const ch = client?.channels.cache.get(queue.textChannelId) as TextChannel | null;
-          ch?.send({ content: "someone's back — resuming.", allowedMentions: { parse: [] } }).catch(() => {});
+          ch?.send({ content: "yay, someone's back~! resuming ♡", allowedMentions: { parse: [] } }).catch(() => {});
         }
       }
       return;
@@ -1192,7 +1192,7 @@ export async function startAlfie(): Promise<void> {
       if (existing) clearTimeout(existing);
 
       const ch = client?.channels.cache.get(queue.textChannelId) as TextChannel | null;
-      ch?.send({ content: "everyone left the vc. pausing — if no one's back in 2 minutes i'm out.", allowedMentions: { parse: [] } }).catch(() => {});
+      ch?.send({ content: "everyone left~ pausing for now ♡ if no one comes back in 2 minutes i'll leave too!", allowedMentions: { parse: [] } }).catch(() => {});
 
       const timer = setTimeout(async () => {
         aloneDisconnectTimers.delete(guildId);
@@ -1200,7 +1200,7 @@ export async function startAlfie(): Promise<void> {
         const q = getQueue(guildId);
         const notifCh = q ? (client?.channels.cache.get(q.textChannelId) as TextChannel | null) : null;
         await disconnectMusic(guildId);
-        notifCh?.send({ content: "no one came back. disconnected.", allowedMentions: { parse: [] } }).catch(() => {});
+        notifCh?.send({ content: "no one came back~ disconnecting, byebye ♡", allowedMentions: { parse: [] } }).catch(() => {});
       }, 2 * 60 * 1000);
       timer.unref?.();
       aloneDisconnectTimers.set(guildId, timer);
