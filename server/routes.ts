@@ -80,6 +80,25 @@ export async function registerRoutes(
 ): Promise<Server> {
   app.use("/api", apiRateLimiter);
 
+  // ── TTS audio proxy — Lavalink fetches this to play TTS ───────────────────
+  app.get("/tts-audio", async (req: Request, res: Response) => {
+    const text = ((req.query.text as string) ?? "").trim().slice(0, 450);
+    if (!text) { res.status(400).end(); return; }
+    const url = `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodeURIComponent(text)}`;
+    try {
+      const upstream = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+      if (!upstream.ok) { res.status(502).end(); return; }
+      res.setHeader("Content-Type", upstream.headers.get("content-type") ?? "audio/mpeg");
+      const cl = upstream.headers.get("content-length");
+      if (cl) res.setHeader("Content-Length", cl);
+      res.setHeader("Cache-Control", "no-store");
+      const buf = await upstream.arrayBuffer();
+      res.end(Buffer.from(buf));
+    } catch {
+      res.status(502).end();
+    }
+  });
+
   // ── Discord OAuth ─────────────────────────────────────────────────────────
 
   app.get("/api/oauth/discord", (req, res) => {

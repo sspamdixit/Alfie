@@ -599,19 +599,6 @@ async function fetchAutoplayTracks(
     } catch { /* ignore */ }
   }
 
-  // Strategy 3: mood-based discovery — read the server vibe and search accordingly
-  if (candidates.length < count && guildId && textChannelId) {
-    try {
-      const { getMoodSeeds } = await import("./mood-engine");
-      const moodSeeds = getMoodSeeds(guildId, textChannelId);
-      const pick = moodSeeds[Math.floor(Math.random() * moodSeeds.length)];
-      const result = await node.rest.resolve(`ytsearch:${pick}`);
-      if (result?.loadType === "search") {
-        for (const t of (result.data as any[])) collect(t);
-      }
-    } catch { /* ignore — mood engine is optional */ }
-  }
-
   return candidates.slice(0, count);
 }
 
@@ -908,6 +895,44 @@ export async function searchTracks(query: string, limit = 5): Promise<SearchResu
   return [];
 }
 
+async function fetchSpotifyOEmbed(url: string): Promise<{ title: string; author: string } | null> {
+  try {
+    const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`;
+    const res = await fetch(oembedUrl, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) return null;
+    const data = await res.json() as { title?: string; author_name?: string };
+    if (!data.title) return null;
+    return { title: data.title, author: data.author_name ?? "" };
+  } catch {
+    return null;
+  }
+}
+
+function rawToTrack(raw: any, requestedBy: string): QueueTrack {
+  return {
+    encoded: raw.encoded,
+    title: raw.info.title,
+    author: raw.info.author,
+    uri: raw.info.uri,
+    duration: raw.info.length,
+    isStream: raw.info.isStream,
+    requestedBy,
+    artworkUrl: raw.info.artworkUrl ?? null,
+  };
+}
+
+async function spotifyFallbackRaw(node: any, url: string): Promise<any | null> {
+  const meta = await fetchSpotifyOEmbed(url);
+  if (!meta) return null;
+  const q = meta.author ? `${meta.author} ${meta.title}` : meta.title;
+  const fallback = await node.rest.resolve(`ytsearch:${q}`);
+  if (fallback?.loadType === "search") {
+    const tracks = fallback.data as any[];
+    return tracks.length ? tracks[0] : null;
+  }
+  return null;
+}
+
 export async function resolveTrack(
   query: string,
   requestedBy: string,
@@ -921,33 +946,24 @@ export async function resolveTrack(
   const identifier = isUrl ? query : `ytsearch:${query}`;
 
   const result = await node.rest.resolve(identifier);
-  if (!result) return null;
 
-  let raw: any;
-  if (result.loadType === "search") {
+  let raw: any = null;
+  if (result?.loadType === "search") {
     const tracks = result.data as any[];
-    if (!tracks.length) return null;
-    raw = tracks[0];
-  } else if (result.loadType === "track") {
+    if (tracks.length) raw = tracks[0];
+  } else if (result?.loadType === "track") {
     raw = result.data;
-  } else if (result.loadType === "playlist") {
+  } else if (result?.loadType === "playlist") {
     const tracks = (result.data as any).tracks as any[];
-    if (!tracks.length) return null;
-    raw = tracks[0];
-  } else {
-    return null;
+    if (tracks.length) raw = tracks[0];
   }
 
-  return {
-    encoded: raw.encoded,
-    title: raw.info.title,
-    author: raw.info.author,
-    uri: raw.info.uri,
-    duration: raw.info.length,
-    isStream: raw.info.isStream,
-    requestedBy,
-    artworkUrl: raw.info.artworkUrl ?? null,
-  };
+  if (!raw && isUrl && /open\.spotify\.com/i.test(query)) {
+    raw = await spotifyFallbackRaw(node, query);
+  }
+
+  if (!raw) return null;
+  return rawToTrack(raw, requestedBy);
 }
 
 export async function resolvePlaylist(
@@ -963,33 +979,38 @@ export async function resolvePlaylist(
   const identifier = isUrl ? query : `ytsearch:${query}`;
 
   const result = await node.rest.resolve(identifier);
-  if (!result) return { tracks: [], playlistName: null };
 
-  const toTrack = (raw: any): QueueTrack => ({
-    encoded: raw.encoded,
-    title: raw.info.title,
-    author: raw.info.author,
-    uri: raw.info.uri,
-    duration: raw.info.length,
-    isStream: raw.info.isStream,
-    requestedBy,
-    artworkUrl: raw.info.artworkUrl ?? null,
-  });
-
-  if (result.loadType === "playlist") {
+  if (result?.loadType === "playlist") {
     const data = result.data as any;
-    const tracks: QueueTrack[] = (data.tracks as any[]).map(toTrack);
+    const tracks: QueueTrack[] = (data.tracks as any[]).map(r => rawToTrack(r, requestedBy));
     return { tracks, playlistName: data.info?.name ?? null };
   }
 
-  if (result.loadType === "search") {
+  if (result?.loadType === "search") {
     const tracks = result.data as any[];
-    if (!tracks.length) return { tracks: [], playlistName: null };
-    return { tracks: [toTrack(tracks[0])], playlistName: null };
+    if (tracks.length) return { tracks: [rawToTrack(tracks[0], requestedBy)], playlistName: null };
   }
 
-  if (result.loadType === "track") {
-    return { tracks: [toTrack(result.data)], playlistName: null };
+  if (result?.loadType === "track") {
+    return { tracks: [rawToTrack(result.data, requestedBy)], playlistName: null };
+  }
+
+  if (isUrl && /open\.spotify\.com/i.test(query)) {
+    const meta = await fetchSpotifyOEmbed(query);
+    if (meta) {
+      const isPlaylistOrAlbum = /\/(playlist|album)\//i.test(query);
+      const searchQ = meta.author ? `${meta.author} ${meta.title}` : meta.title;
+      const fallback = await node.rest.resolve(`ytsearch:${searchQ}`);
+      if (fallback?.loadType === "search") {
+        const tracks = fallback.data as any[];
+        if (tracks.length) {
+          return {
+            tracks: [rawToTrack(tracks[0], requestedBy)],
+            playlistName: isPlaylistOrAlbum ? meta.title : null,
+          };
+        }
+      }
+    }
   }
 
   return { tracks: [], playlistName: null };

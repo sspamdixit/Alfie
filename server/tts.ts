@@ -1,8 +1,6 @@
 import { log } from "./index";
 import { resolveTrack, addToFront, type QueueTrack } from "./music";
 
-const STREAMELEMENTS_TTS_BASE = "https://api.streamelements.com/kappa/v2/speech";
-const BRIAN_VOICE = "Brian";
 const MAX_TTS_CHARS = 450;
 
 function buildTTSUrl(text: string): string {
@@ -14,7 +12,13 @@ function buildTTSUrl(text: string): string {
     .trim()
     .slice(0, MAX_TTS_CHARS);
 
-  return `${STREAMELEMENTS_TTS_BASE}?voice=${BRIAN_VOICE}&text=${encodeURIComponent(cleaned)}`;
+  const base = (
+    process.env.RENDER_EXTERNAL_URL ??
+    process.env.PUBLIC_BASE_URL ??
+    `http://localhost:${process.env.PORT ?? 5000}`
+  ).replace(/\/$/, "");
+
+  return `${base}/tts-audio?text=${encodeURIComponent(cleaned)}`;
 }
 
 export async function resolveTTSTrack(text: string, requestedBy = "tts"): Promise<QueueTrack | null> {
