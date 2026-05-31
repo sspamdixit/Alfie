@@ -469,8 +469,6 @@ export async function startAlfie(): Promise<void> {
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildVoiceStates,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.MessageContent,
     ],
   });
 
