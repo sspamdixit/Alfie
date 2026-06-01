@@ -10,7 +10,13 @@ interface LavalinkNodeConfig {
   secure: boolean;
 }
 
-const DEFAULT_LAVALINK_NODES: LavalinkNodeConfig[] = [
+// Penalty at which the local node is considered overloaded and traffic falls
+// back to public nodes. Shoukaku penalty scores: lower = healthier.
+// Typical idle penalty ~0-10; moderate load ~30-60; degraded > 75.
+const LOCAL_NODE_NAME = "local";
+const LOCAL_NODE_OVERLOAD_PENALTY = 80;
+
+const PUBLIC_LAVALINK_NODES: LavalinkNodeConfig[] = [
   // Jirayu — stable, ~99% uptime
   { name: "jirayu-ssl", url: "lavalink.jirayu.net:443", auth: "youshallnotpass", secure: true },
   { name: "jirayu", url: "lavalink.jirayu.net:13592", auth: "youshallnotpass", secure: false },
@@ -31,6 +37,39 @@ const DEFAULT_LAVALINK_NODES: LavalinkNodeConfig[] = [
   { name: "nyxbot-sg2", url: "sg2-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
 ];
 
+// Custom node resolver: always try the local node first when it is healthy.
+// If the local node is overloaded (penalty >= threshold) or has no stats yet
+// after a grace period, fall through to the least-loaded public node.
+function localFirstNodeResolver(nodes: Map<string, any>, _connection?: any): any | undefined {
+  const nodeArray = [...nodes.values()];
+  if (!nodeArray.length) return undefined;
+
+  const local = nodeArray.find((n) => n.name === LOCAL_NODE_NAME);
+  if (local) {
+    if (local.stats) {
+      const penalty = Number(local.penalties ?? 0);
+      if (penalty < LOCAL_NODE_OVERLOAD_PENALTY) {
+        return local;
+      }
+      log(
+        `[Music] Local node overloaded (penalty ${penalty.toFixed(0)} ≥ ${LOCAL_NODE_OVERLOAD_PENALTY}) — routing to public pool.`,
+        "discord",
+      );
+    } else {
+      // Node just connected, no stats yet — optimistically prefer it.
+      return local;
+    }
+  }
+
+  // Least-loaded from the available pool (nodes that have reported stats).
+  const withStats = nodeArray.filter((n) => n.stats);
+  if (withStats.length) {
+    return withStats.sort((a, b) => Number(a.penalties ?? 0) - Number(b.penalties ?? 0))[0];
+  }
+
+  return nodeArray[0];
+}
+
 function parseBoolean(value: string | undefined): boolean {
   return /^(1|true|yes)$/i.test(value ?? "");
 }
@@ -46,34 +85,50 @@ function normalizeLavalinkNode(raw: any, fallbackName: string): LavalinkNodeConf
 }
 
 function getLavalinkNodes(): LavalinkNodeConfig[] {
+  // ── Multi-node JSON config (LAVALINK_NODES) ───────────────────────────────
+  // If set, these nodes are used *in addition to* any single local node below.
+  // They will always appear after the local node so the resolver tries local first.
+  let extraNodes: LavalinkNodeConfig[] = [];
   const rawNodes = process.env.LAVALINK_NODES?.trim();
-
   if (rawNodes) {
     try {
       const parsed = JSON.parse(rawNodes);
       const nodeList = Array.isArray(parsed) ? parsed : [parsed];
-      const nodes = nodeList
+      extraNodes = nodeList
         .map((node, index) => normalizeLavalinkNode(node, `node-${index + 1}`))
         .filter((node): node is LavalinkNodeConfig => Boolean(node));
-
-      if (nodes.length > 0) return nodes;
-      log("[Music] LAVALINK_NODES was set but contained no valid nodes.", "discord");
+      if (!extraNodes.length) {
+        log("[Music] LAVALINK_NODES was set but contained no valid nodes.", "discord");
+      }
     } catch (err: any) {
       log(`[Music] Could not parse LAVALINK_NODES JSON: ${err.message}`, "discord");
     }
   }
 
-  const singleNode = normalizeLavalinkNode(
+  // ── Single local node (LAVALINK_URL / LAVALINK_PASSWORD) ─────────────────
+  // Named "local" so the custom node resolver can identify and prefer it.
+  const localNode = normalizeLavalinkNode(
     {
-      name: process.env.LAVALINK_NAME || "custom",
+      name: LOCAL_NODE_NAME,
       url: process.env.LAVALINK_URL,
       auth: process.env.LAVALINK_AUTH || process.env.LAVALINK_PASSWORD,
       secure: process.env.LAVALINK_SECURE,
     },
-    "custom",
+    LOCAL_NODE_NAME,
   );
 
-  return singleNode ? [singleNode] : DEFAULT_LAVALINK_NODES;
+  // ── Build final node list ─────────────────────────────────────────────────
+  // Order: local first → any LAVALINK_NODES extras → public fallbacks.
+  // The localFirstNodeResolver will honour this preference at routing time.
+  if (localNode) {
+    const publicPool = extraNodes.length ? extraNodes : PUBLIC_LAVALINK_NODES;
+    log(`[Music] Local Lavalink node configured at ${localNode.url} — public pool has ${publicPool.length} nodes as fallback.`, "discord");
+    return [localNode, ...publicPool];
+  }
+
+  if (extraNodes.length) return extraNodes;
+
+  return PUBLIC_LAVALINK_NODES;
 }
 
 export interface QueueTrack {
@@ -167,6 +222,7 @@ export function initMusic(client: Client): void {
     resumeByLibrary: false,
     reconnectTries: 5,
     reconnectInterval: 5,
+    nodeResolver: localFirstNodeResolver,
   });
 
   shoukaku.on("ready", (name) =>

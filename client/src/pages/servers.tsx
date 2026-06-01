@@ -90,7 +90,7 @@ export default function ServersPage() {
               onClick={() => navigate("/")}
               className="text-sm text-white/30 hover:text-white/70 transition-colors"
             >
-              ← alfie
+              ← alessa
             </button>
           </div>
           {user && (
@@ -119,7 +119,7 @@ export default function ServersPage() {
 
         {activeGuilds.length > 0 && (
           <section className="mb-12">
-            <p className="text-xs text-white/25 uppercase tracking-widest font-medium mb-5">Alfie is here</p>
+            <p className="text-xs text-white/25 uppercase tracking-widest font-medium mb-5">Alessa is here</p>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {activeGuilds.map((guild) => (
                 <GuildCard
@@ -135,7 +135,7 @@ export default function ServersPage() {
 
         {otherGuilds.length > 0 && (
           <section className="mb-12">
-            <p className="text-xs text-white/25 uppercase tracking-widest font-medium mb-5">Add Alfie</p>
+            <p className="text-xs text-white/25 uppercase tracking-widest font-medium mb-5">Add Alessa</p>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {otherGuilds.map((guild) => (
                 <GuildCard
@@ -194,7 +194,7 @@ function GuildCard({
             : "text-white/50 border-white/8 hover:border-white/20 hover:text-white/70"
         }`}
       >
-        {active ? "Add again →" : "Add Alfie"}
+        {active ? "Add again →" : "Add Alessa"}
       </button>
     </div>
   );

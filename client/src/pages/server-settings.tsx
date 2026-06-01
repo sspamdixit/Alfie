@@ -88,15 +88,15 @@ export default function ServerSettingsPage() {
 
         {guild && !guild.hasAlfie && (
           <div className="mb-8 p-4 rounded-lg border border-white/[0.1] bg-white/[0.03]">
-            <p className="text-sm text-white/60 mb-1 font-medium">Alfie isn't in this server yet</p>
-            <p className="text-xs text-white/30 mb-3">Add Alfie to start using music commands.</p>
+            <p className="text-sm text-white/60 mb-1 font-medium">Alessa isn't in this server yet</p>
+            <p className="text-xs text-white/30 mb-3">Add Alessa to start using music commands.</p>
             <a
               href={`/api/public/invite-url?guild_id=${guild?.id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-white/50 hover:text-white/80 transition-colors underline underline-offset-4"
             >
-              Add Alfie to this server →
+              Add Alessa to this server →
             </a>
           </div>
         )}
@@ -104,7 +104,7 @@ export default function ServerSettingsPage() {
         <div className="mb-10">
           <h1 className="text-2xl font-bold text-white mb-1">{guild?.name ?? "Server"}</h1>
           <p className="text-sm text-white/30">
-            {guild?.hasAlfie ? "Alfie is active in this server." : "Alfie is not in this server yet."}
+            {guild?.hasAlfie ? "Alessa is active in this server." : "Alessa is not in this server yet."}
           </p>
         </div>
 
@@ -128,7 +128,7 @@ export default function ServerSettingsPage() {
               rel="noopener noreferrer"
               className="text-sm text-white/30 hover:text-white/60 transition-colors underline underline-offset-4"
             >
-              Re-invite Alfie to this server
+              Re-invite Alessa to this server
             </a>
           </div>
         )}

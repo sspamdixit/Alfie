@@ -18,7 +18,7 @@ import {
 } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-const AUTH_FLAG_KEY = "alfie-authed";
+const AUTH_FLAG_KEY = "alessa-authed";
 
 function hasDashboardSession(): boolean {
   return (
@@ -27,7 +27,7 @@ function hasDashboardSession(): boolean {
   );
 }
 
-interface AlfieBotStatus {
+interface AlessaBotStatus {
   online: boolean;
   tag: string | null;
   avatarUrl: string | null;
@@ -134,7 +134,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-white/5 border border-white/10 mb-4">
             <Lock className="w-5 h-5 text-white/50" />
           </div>
-          <h1 className="text-xl font-semibold text-white mb-1">Alfie Dashboard</h1>
+          <h1 className="text-xl font-semibold text-white mb-1">Alessa Dashboard</h1>
           <p className="text-sm text-white/30">Admin access</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -165,7 +165,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 // ── Main dashboard ────────────────────────────────────────────────────────────
 
 function Dashboard() {
-  const { data: alfie, isLoading: alfieLoading } = useQuery<AlfieBotStatus>({
+  const { data: alfie, isLoading: alfieLoading } = useQuery<AlessaBotStatus>({
     queryKey: ["/api/alfie/status"],
     refetchInterval: 5000,
   });
@@ -195,7 +195,7 @@ function Dashboard() {
         <div className="max-w-4xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Bot className="w-4 h-4 text-white/40" />
-            <span className="text-sm font-medium text-white/60">Alfie Admin</span>
+            <span className="text-sm font-medium text-white/60">Alessa Admin</span>
           </div>
           <button
             onClick={handleLogout}
@@ -227,7 +227,7 @@ function Dashboard() {
                 )}
                 <div>
                   <p className="text-base font-semibold text-white">
-                    {alfie?.tag ?? "Alfie"}
+                    {alfie?.tag ?? "Alessa"}
                   </p>
                   <p className="text-xs text-white/30 capitalize">{alfie?.status ?? "offline"}</p>
                 </div>
@@ -247,7 +247,7 @@ function Dashboard() {
 
               {!alfie?.online && !alfie?.lastError && (
                 <p className="text-xs text-white/30 bg-white/[0.03] rounded-lg px-3 py-2">
-                  Set <code className="text-white/50">ALFIE_TOKEN</code> in Secrets and ensure <code className="text-white/50">ENABLE_ALFIE=true</code> to bring Alfie online.
+                  Set <code className="text-white/50">ALFIE_TOKEN</code> in Secrets and ensure <code className="text-white/50">ENABLE_ALFIE=true</code> to bring Alessa online.
                 </p>
               )}
             </div>
