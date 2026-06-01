@@ -1,0 +1,91 @@
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'npm run start'
+> rest-express@1.0.0 start
+> NODE_ENV=production node dist/index.cjs
+12:33:13 PM [express] serving on port 10000
+12:33:14 PM [alfie] [Alfie] Attempting Discord login…
+12:33:14 PM [keep-alive] Keep-alive active → pinging https://alfie-yql7.onrender.com/health every 10 min
+12:33:15 PM [alfie] [Alfie] Logged in as Alessa#6226
+12:33:15 PM [discord] [Music] Local Lavalink node configured at lavalink.endministrator.site — public pool has 9 nodes as fallback.
+12:33:15 PM [discord] [Music] Initialising Lavalink with nodes: local, jirayu-ssl, jirayu, serenetia-v4-ssl, serenetia-v4, serenetia-ssl, serenetia, millohost, nyxbot-sg1, nyxbot-sg2
+(node:82) DeprecationWarning: The ready event has been renamed to clientReady to distinguish it from the gateway READY event and will only emit under that name in v15. Please use clientReady instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+12:33:15 PM [discord] [Music] Lavalink node "local" error: Unexpected server response: 301
+12:33:15 PM [discord] [Music] Lavalink node "jirayu" connected.
+12:33:15 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+12:33:15 PM [alfie] [Alfie] Slash commands registered in Dumpster Fire
+12:33:16 PM [discord] [Music] Lavalink node "serenetia-v4" connected.
+12:33:16 PM [discord] [Music] Lavalink node "serenetia-v4-ssl" connected.
+12:33:16 PM [discord] [Music] Lavalink node "serenetia" connected.
+12:33:16 PM [alfie] [Alfie] Slash commands registered in Doro Pharmaceuticals
+12:33:16 PM [discord] [Music] Lavalink node "serenetia-ssl" connected.
+12:33:16 PM [discord] [Music] Lavalink node "nyxbot-sg1" connected.
+12:33:16 PM [discord] [Music] Lavalink node "nyxbot-sg2" connected.
+12:33:16 PM [discord] [Music] Lavalink node "millohost" connected.
+12:33:20 PM [discord] [Music] Lavalink node "local" error: Unexpected server response: 301
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://alfie-yql7.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+12:33:25 PM [discord] [Music] Lavalink node "local" error: Unexpected server response: 301
+12:33:30 PM [discord] [Music] Lavalink node "local" error: Unexpected server response: 301
+12:33:35 PM [discord] [Music] Lavalink node "local" error: Unexpected server response: 301
+12:33:40 PM [discord] [Music] Lavalink node "local" error: Websocket closed before a connection was established
+12:34:15 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+12:34:16 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+12:35:16 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+12:35:16 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+12:36:16 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+12:36:16 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+12:36:28 PM [express] GET /api/public/invite-url 200 in 6ms
+12:37:16 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+12:37:17 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'npm run start'
+> rest-express@1.0.0 start
+> NODE_ENV=production node dist/index.cjs
+12:38:03 PM [express] serving on port 10000
+12:38:03 PM [alfie] [Alfie] Attempting Discord login…
+12:38:03 PM [keep-alive] Keep-alive active → pinging https://alfie-yql7.onrender.com/health every 10 min
+12:38:05 PM [alfie] [Alfie] Logged in as Alessa#6226
+12:38:05 PM [discord] [Music] Local Lavalink node configured at lavalink.endministrator.site — public pool has 9 nodes as fallback.
+12:38:05 PM [discord] [Music] Initialising Lavalink with nodes: local, jirayu-ssl, jirayu, serenetia-v4-ssl, serenetia-v4, serenetia-ssl, serenetia, millohost, nyxbot-sg1, nyxbot-sg2
+(node:82) DeprecationWarning: The ready event has been renamed to clientReady to distinguish it from the gateway READY event and will only emit under that name in v15. Please use clientReady instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+12:38:05 PM [alfie] [Alfie] Slash commands registered in Dumpster Fire
+12:38:05 PM [discord] [Music] Lavalink node "jirayu" connected.
+12:38:05 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+12:38:05 PM [discord] [Music] Lavalink node "serenetia-v4" connected.
+12:38:05 PM [discord] [Music] Lavalink node "serenetia-v4-ssl" connected.
+12:38:05 PM [discord] [Music] Lavalink node "serenetia" connected.
+12:38:05 PM [alfie] [Alfie] Slash commands registered in Doro Pharmaceuticals
+12:38:05 PM [discord] [Music] Lavalink node "local" connected.
+12:38:05 PM [discord] [Music] Lavalink node "serenetia-ssl" connected.
+12:38:05 PM [discord] [Music] Lavalink node "nyxbot-sg1" connected.
+12:38:05 PM [discord] [Music] Lavalink node "nyxbot-sg2" connected.
+12:38:05 PM [discord] [Music] Lavalink node "millohost" connected.
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://alfie-yql7.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+12:39:05 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+12:39:05 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+12:40:05 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+12:40:06 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+12:41:05 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+12:41:06 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+12:42:06 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+12:42:06 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+12:43:06 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+12:43:06 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+==> Detected service running on port 10000
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+12:46:45 PM [alfie] [Alfie] Discord client error: Unknown interaction
