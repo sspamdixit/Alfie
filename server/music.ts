@@ -983,6 +983,38 @@ export async function resolveTrack(
     if (!raw && /open\.spotify\.com/i.test(query)) {
       raw = await spotifyFallbackRaw(query);
     }
+
+    // YouTube URL fallback: public nodes often block direct URL resolution.
+    // Try SoundCloud search with the URL itself — some nodes resolve it.
+    // Then try every node with the full URL.
+    if (!raw && /youtu\.?be/i.test(query)) {
+      for (const prefix of ["scsearch", "ytsearch", "ytmsearch"]) {
+        try {
+          const r = await node.rest.resolve(`${prefix}:${query}`);
+          if (r?.loadType === "search") {
+            const tracks = (r.data as any[]).filter(t => !isDeezerTrack(t));
+            if (tracks.length) { raw = tracks[0]; break; }
+          } else if (r?.loadType === "track") {
+            raw = r.data; break;
+          }
+        } catch { /* try next */ }
+      }
+      // Last resort: try other nodes with the raw URL
+      if (!raw) {
+        const nodes = [...(shoukaku!.nodes as Map<string, any>).values()];
+        for (const n of nodes) {
+          if (n === node) continue;
+          try {
+            const r = await n.rest.resolve(query);
+            if (r?.loadType === "track") { raw = r.data; break; }
+            if (r?.loadType === "search") {
+              const tracks = (r.data as any[]).filter(t => !isDeezerTrack(t));
+              if (tracks.length) { raw = tracks[0]; break; }
+            }
+          } catch { /* try next */ }
+        }
+      }
+    }
   } else {
     // Non-URL: cascade ytmsearch → ytsearch → scsearch across all nodes
     raw = await resolveSearchAnyNode(query);
