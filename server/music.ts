@@ -923,23 +923,28 @@ export async function resolveTrack(
   if (!node) throw new Error("No Lavalink nodes available.");
 
   const isUrl = /^https?:\/\//i.test(query);
-  const identifier = isUrl ? query : `ytsearch:${query}`;
-
-  const result = await node.rest.resolve(identifier);
 
   let raw: any = null;
-  if (result?.loadType === "search") {
-    const tracks = result.data as any[];
-    if (tracks.length) raw = tracks[0];
-  } else if (result?.loadType === "track") {
-    raw = result.data;
-  } else if (result?.loadType === "playlist") {
-    const tracks = (result.data as any).tracks as any[];
-    if (tracks.length) raw = tracks[0];
-  }
 
-  if (!raw && isUrl && /open\.spotify\.com/i.test(query)) {
-    raw = await spotifyFallbackRaw(node, query);
+  if (isUrl) {
+    const result = await node.rest.resolve(query);
+    if (result?.loadType === "search") {
+      const tracks = result.data as any[];
+      if (tracks.length) raw = tracks[0];
+    } else if (result?.loadType === "track") {
+      raw = result.data;
+    } else if (result?.loadType === "playlist") {
+      const tracks = (result.data as any).tracks as any[];
+      if (tracks.length) raw = tracks[0];
+    }
+
+    // Spotify URL fallback: oEmbed → multi-source search
+    if (!raw && /open\.spotify\.com/i.test(query)) {
+      raw = await spotifyFallbackRaw(node, query);
+    }
+  } else {
+    // Non-URL: try ytmsearch → ytsearch → scsearch
+    raw = await resolveSearch(node, query);
   }
 
   if (!raw) return null;
@@ -956,41 +961,44 @@ export async function resolvePlaylist(
   if (!node) throw new Error("No Lavalink nodes available.");
 
   const isUrl = /^https?:\/\//i.test(query);
-  const identifier = isUrl ? query : `ytsearch:${query}`;
 
-  const result = await node.rest.resolve(identifier);
+  if (isUrl) {
+    const result = await node.rest.resolve(query);
 
-  if (result?.loadType === "playlist") {
-    const data = result.data as any;
-    const tracks: QueueTrack[] = (data.tracks as any[]).map(r => rawToTrack(r, requestedBy));
-    return { tracks, playlistName: data.info?.name ?? null };
-  }
+    if (result?.loadType === "playlist") {
+      const data = result.data as any;
+      const tracks: QueueTrack[] = (data.tracks as any[]).map(r => rawToTrack(r, requestedBy));
+      return { tracks, playlistName: data.info?.name ?? null };
+    }
 
-  if (result?.loadType === "search") {
-    const tracks = result.data as any[];
-    if (tracks.length) return { tracks: [rawToTrack(tracks[0], requestedBy)], playlistName: null };
-  }
+    if (result?.loadType === "search") {
+      const tracks = result.data as any[];
+      if (tracks.length) return { tracks: [rawToTrack(tracks[0], requestedBy)], playlistName: null };
+    }
 
-  if (result?.loadType === "track") {
-    return { tracks: [rawToTrack(result.data, requestedBy)], playlistName: null };
-  }
+    if (result?.loadType === "track") {
+      return { tracks: [rawToTrack(result.data, requestedBy)], playlistName: null };
+    }
 
-  if (isUrl && /open\.spotify\.com/i.test(query)) {
-    const meta = await fetchSpotifyOEmbed(query);
-    if (meta) {
-      const isPlaylistOrAlbum = /\/(playlist|album)\//i.test(query);
-      const searchQ = meta.author ? `${meta.author} ${meta.title}` : meta.title;
-      const fallback = await node.rest.resolve(`ytsearch:${searchQ}`);
-      if (fallback?.loadType === "search") {
-        const tracks = fallback.data as any[];
-        if (tracks.length) {
+    // Spotify URL fallback: oEmbed → multi-source search
+    if (/open\.spotify\.com/i.test(query)) {
+      const meta = await fetchSpotifyOEmbed(query);
+      if (meta) {
+        const isPlaylistOrAlbum = /\/(playlist|album)\//i.test(query);
+        const searchQ = meta.author ? `${meta.author} ${meta.title}` : meta.title;
+        const raw = await resolveSearch(node, searchQ);
+        if (raw) {
           return {
-            tracks: [rawToTrack(tracks[0], requestedBy)],
+            tracks: [rawToTrack(raw, requestedBy)],
             playlistName: isPlaylistOrAlbum ? meta.title : null,
           };
         }
       }
     }
+  } else {
+    // Non-URL: try ytmsearch → ytsearch → scsearch
+    const raw = await resolveSearch(node, query);
+    if (raw) return { tracks: [rawToTrack(raw, requestedBy)], playlistName: null };
   }
 
   return { tracks: [], playlistName: null };

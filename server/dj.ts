@@ -409,11 +409,22 @@ export async function refillDjQueue(guildId: string, session: DjSession): Promis
       const variants = buildQueryVariants(session.genre, session.phase, session.vibeShift);
       const query    = variants[Math.floor(Math.random() * variants.length)];
       try {
-        const result = await node.rest.resolve(`ytsearch:${query}`);
-        if (result?.loadType === "search") {
-          const extra = (result.data as any[]).filter(fresh).map((r) => toQueueTrack(r, reqBy));
-          tracks = [...tracks, ...extra];
-          log(`[Rave] search "${query}": +${extra.length} (total ${tracks.length})`, "discord");
+        // Try multiple search sources: ytmsearch → ytsearch → scsearch
+        const searchPrefixes = ["ytmsearch", "ytsearch", "scsearch"];
+        let found = false;
+        for (const prefix of searchPrefixes) {
+          if (found) break;
+          try {
+            const result = await node.rest.resolve(`${prefix}:${query}`);
+            if (result?.loadType === "search") {
+              const extra = (result.data as any[]).filter(fresh).map((r) => toQueueTrack(r, reqBy));
+              if (extra.length) {
+                tracks = [...tracks, ...extra];
+                log(`[Rave] search [${prefix}] "${query}": +${extra.length} (total ${tracks.length})`, "discord");
+                found = true;
+              }
+            }
+          } catch { /* try next source */ }
         }
       } catch { /* ignore */ }
     }
