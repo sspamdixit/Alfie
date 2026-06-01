@@ -793,6 +793,14 @@ function attachPlayerEvents(player: Player, guildId: string): void {
     const q = queues.get(guildId);
     if (!q || q.isStopped) return;
 
+    // Deezer stream failures are permanent (LavaSrc mis-routes to Deezer) —
+    // skip immediately instead of wasting 3 recovery attempts on the same bad track.
+    if (/deezer/i.test(msg)) {
+      log(`[Music] Deezer stream failure — skipping track immediately.`, "discord");
+      void advanceQueue(player, guildId);
+      return;
+    }
+
     void attemptRecovery(player, guildId, "exception", msg);
   });
 
@@ -841,8 +849,8 @@ export async function searchTracks(query: string, limit = 5): Promise<SearchResu
       return [];
     }
 
-    // Non-URL: try multiple search sources so YouTube blocks don't kill search
-    const raws = await resolveSearchMultiple(node, query, limit);
+    // Non-URL: try multiple sources across all nodes
+    const raws = await resolveSearchMultipleAnyNode(query, limit);
     return raws.map(toResult);
   } catch {
     // silently return empty on search errors
@@ -854,12 +862,19 @@ export async function searchTracks(query: string, limit = 5): Promise<SearchResu
 // Try multiple search sources so YouTube rate-limits don't silently kill search
 const SEARCH_PREFIXES = ["ytmsearch", "ytsearch", "scsearch"];
 
+// LavaSrc on public nodes routes ytmsearch: through Deezer for audio — those
+// streams frequently fail with "Deezer stream metadata is missing". Filter them.
+function isDeezerTrack(raw: any): boolean {
+  const uri: string = raw?.info?.uri ?? "";
+  return /deezer\.com/i.test(uri) || uri.startsWith("dz:");
+}
+
 async function resolveSearch(node: any, query: string): Promise<any | null> {
   for (const prefix of SEARCH_PREFIXES) {
     try {
       const result = await node.rest.resolve(`${prefix}:${query}`);
       if (result?.loadType === "search") {
-        const tracks = result.data as any[];
+        const tracks = (result.data as any[]).filter(t => !isDeezerTrack(t));
         if (tracks.length) return tracks[0];
       }
     } catch { /* try next source */ }
@@ -872,10 +887,36 @@ async function resolveSearchMultiple(node: any, query: string, limit: number): P
     try {
       const result = await node.rest.resolve(`${prefix}:${query}`);
       if (result?.loadType === "search") {
-        const tracks = result.data as any[];
+        const tracks = (result.data as any[]).filter(t => !isDeezerTrack(t));
         if (tracks.length) return tracks.slice(0, limit);
       }
     } catch { /* try next source */ }
+  }
+  return [];
+}
+
+// If the ideal node returns nothing, walk every connected node until we find results.
+// This prevents a single cycling/blocked node from killing all searches.
+async function resolveSearchAnyNode(query: string): Promise<any | null> {
+  if (!shoukaku) return null;
+  const nodes = [...(shoukaku.nodes as Map<string, any>).values()];
+  for (const node of nodes) {
+    try {
+      const result = await resolveSearch(node, query);
+      if (result) return result;
+    } catch { /* try next node */ }
+  }
+  return null;
+}
+
+async function resolveSearchMultipleAnyNode(query: string, limit: number): Promise<any[]> {
+  if (!shoukaku) return [];
+  const nodes = [...(shoukaku.nodes as Map<string, any>).values()];
+  for (const node of nodes) {
+    try {
+      const result = await resolveSearchMultiple(node, query, limit);
+      if (result.length) return result;
+    } catch { /* try next node */ }
   }
   return [];
 }
@@ -906,11 +947,11 @@ function rawToTrack(raw: any, requestedBy: string): QueueTrack {
   };
 }
 
-async function spotifyFallbackRaw(node: any, url: string): Promise<any | null> {
+async function spotifyFallbackRaw(url: string): Promise<any | null> {
   const meta = await fetchSpotifyOEmbed(url);
   if (!meta) return null;
   const q = meta.author ? `${meta.author} ${meta.title}` : meta.title;
-  return resolveSearch(node, q);
+  return resolveSearchAnyNode(q);
 }
 
 export async function resolveTrack(
@@ -929,7 +970,7 @@ export async function resolveTrack(
   if (isUrl) {
     const result = await node.rest.resolve(query);
     if (result?.loadType === "search") {
-      const tracks = result.data as any[];
+      const tracks = (result.data as any[]).filter(t => !isDeezerTrack(t));
       if (tracks.length) raw = tracks[0];
     } else if (result?.loadType === "track") {
       raw = result.data;
@@ -938,13 +979,13 @@ export async function resolveTrack(
       if (tracks.length) raw = tracks[0];
     }
 
-    // Spotify URL fallback: oEmbed → multi-source search
+    // Spotify URL fallback: oEmbed → multi-source search across all nodes
     if (!raw && /open\.spotify\.com/i.test(query)) {
-      raw = await spotifyFallbackRaw(node, query);
+      raw = await spotifyFallbackRaw(query);
     }
   } else {
-    // Non-URL: try ytmsearch → ytsearch → scsearch
-    raw = await resolveSearch(node, query);
+    // Non-URL: cascade ytmsearch → ytsearch → scsearch across all nodes
+    raw = await resolveSearchAnyNode(query);
   }
 
   if (!raw) return null;
@@ -980,13 +1021,13 @@ export async function resolvePlaylist(
       return { tracks: [rawToTrack(result.data, requestedBy)], playlistName: null };
     }
 
-    // Spotify URL fallback: oEmbed → multi-source search
+    // Spotify URL fallback: oEmbed → multi-source search across all nodes
     if (/open\.spotify\.com/i.test(query)) {
       const meta = await fetchSpotifyOEmbed(query);
       if (meta) {
         const isPlaylistOrAlbum = /\/(playlist|album)\//i.test(query);
         const searchQ = meta.author ? `${meta.author} ${meta.title}` : meta.title;
-        const raw = await resolveSearch(node, searchQ);
+        const raw = await resolveSearchAnyNode(searchQ);
         if (raw) {
           return {
             tracks: [rawToTrack(raw, requestedBy)],
@@ -996,8 +1037,8 @@ export async function resolvePlaylist(
       }
     }
   } else {
-    // Non-URL: try ytmsearch → ytsearch → scsearch
-    const raw = await resolveSearch(node, query);
+    // Non-URL: cascade ytmsearch → ytsearch → scsearch across all nodes
+    const raw = await resolveSearchAnyNode(query);
     if (raw) return { tracks: [rawToTrack(raw, requestedBy)], playlistName: null };
   }
 

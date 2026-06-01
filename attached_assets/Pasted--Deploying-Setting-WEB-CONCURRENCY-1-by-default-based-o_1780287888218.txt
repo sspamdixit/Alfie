@@ -1,0 +1,43 @@
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'npm run start'
+> rest-express@1.0.0 start
+> NODE_ENV=production node dist/index.cjs
+4:21:19 AM [express] serving on port 10000
+4:21:19 AM [alfie] [Alfie] Attempting Discord login…
+4:21:19 AM [keep-alive] Keep-alive active → pinging https://alfie-yql7.onrender.com/health every 10 min
+4:21:20 AM [alfie] [Alfie] Logged in as Alfie#6226
+4:21:20 AM [discord] [Music] Initialising Lavalink with nodes: jirayu-ssl, jirayu, serenetia-v4-ssl, serenetia-v4, serenetia-ssl, serenetia, millohost, nyxbot-sg1, nyxbot-sg2
+(node:84) DeprecationWarning: The ready event has been renamed to clientReady to distinguish it from the gateway READY event and will only emit under that name in v15. Please use clientReady instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+4:21:21 AM [discord] [Music] Lavalink node "jirayu" connected.
+4:21:21 AM [alfie] [Alfie] Slash commands registered in Dumpster Fire
+4:21:21 AM [discord] [Music] Lavalink node "serenetia-v4" connected.
+4:21:21 AM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+4:21:21 AM [discord] [Music] Lavalink node "serenetia" connected.
+4:21:21 AM [discord] [Music] Lavalink node "serenetia-v4-ssl" connected.
+4:21:21 AM [alfie] [Alfie] Slash commands registered in Doro Pharmaceuticals
+4:21:21 AM [discord] [Music] Lavalink node "serenetia-ssl" connected.
+4:21:21 AM [discord] [Music] Lavalink node "nyxbot-sg1" connected.
+4:21:21 AM [discord] [Music] Lavalink node "nyxbot-sg2" connected.
+4:21:21 AM [discord] [Music] Lavalink node "millohost" connected.
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://alfie-yql7.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+4:22:21 AM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+4:22:21 AM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+4:23:21 AM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+4:23:21 AM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+4:23:33 AM [discord] [Rave] search [ytmsearch] "best chill jazz": +20 (total 20)
+4:23:41 AM [discord] [Music] Track exception in guild 1508055605279985704: Deezer stream metadata is missing the song identifier.
+4:23:41 AM [discord] [Music] Recovery attempt 1/3 for "Morning Café Jazz" in guild 1508055605279985704 (exception: Deezer stream metadata is missing the song identifier.) — replaying from LIVE.
+4:23:46 AM [discord] [Music] Track exception in guild 1508055605279985704: Deezer stream metadata is missing the song identifier.
+4:23:46 AM [discord] [Music] Recovery attempt 2/3 for "Morning Café Jazz" in guild 1508055605279985704 (exception: Deezer stream metadata is missing the song identifier.) — replaying from LIVE.
+4:23:50 AM [discord] [Music] Track exception in guild 1508055605279985704: Deezer stream metadata is missing the song identifier.
+4:23:50 AM [discord] [Music] Recovery attempt 3/3 for "Morning Café Jazz" in guild 1508055605279985704 (exception: Deezer stream metadata is missing the song identifier.) — replaying from LIVE.
+4:23:55 AM [discord] [Music] Track exception in guild 1508055605279985704: Deezer stream metadata is missing the song identifier.
+4:23:55 AM [discord] [Music] Recovery exhausted for "Morning Café Jazz" in guild 1508055605279985704 (exception: Deezer stream metadata is missing the song identifier.). Skipping.
