@@ -394,7 +394,7 @@ export function getQueue(guildId: string): GuildQueue | undefined {
 }
 
 export function formatDuration(ms: number): string {
-  if (ms === 0) return "LIVE";
+  if (ms < 0) return "LIVE";
   const s = Math.floor(ms / 1000);
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);

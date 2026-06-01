@@ -239,7 +239,8 @@ function formatSpotifyProgressBar(track: QueueTrack, queue: GuildQueue): string 
   const markerIndex = Math.max(0, Math.min(SPOTIFY_PROGRESS_SEGMENTS - 1, Math.round((position / track.duration) * (SPOTIFY_PROGRESS_SEGMENTS - 1))));
   const filled = "━".repeat(markerIndex);
   const remaining = "─".repeat(SPOTIFY_PROGRESS_SEGMENTS - markerIndex - 1);
-  return `[ ${formatDuration(position)} ] ${filled}🔘${remaining} [ ${formatDuration(track.duration)} ]`;
+  const posLabel = position === 0 ? "0:00" : formatDuration(position);
+  return `[ ${posLabel} ] ${filled}🔘${remaining} [ ${formatDuration(track.duration)} ]`;
 }
 
 function buildEmbedWithImageUrl(track: QueueTrack, queue: GuildQueue, imageUrl: string | null): EmbedBuilder {
