@@ -1,31 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 
-const LACE_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>
-  <line x1='0' y1='0' x2='80' y2='80' stroke='black' stroke-width='0.9' opacity='0.14'/>
-  <line x1='80' y1='0' x2='0' y2='80' stroke='black' stroke-width='0.9' opacity='0.14'/>
-  <line x1='0' y1='40' x2='40' y2='0' stroke='black' stroke-width='0.6' opacity='0.1'/>
-  <line x1='40' y1='0' x2='80' y2='40' stroke='black' stroke-width='0.6' opacity='0.1'/>
-  <line x1='80' y1='40' x2='40' y2='80' stroke='black' stroke-width='0.6' opacity='0.1'/>
-  <line x1='40' y1='80' x2='0' y2='40' stroke='black' stroke-width='0.6' opacity='0.1'/>
-  <circle cx='40' cy='40' r='7' fill='none' stroke='black' stroke-width='0.9' opacity='0.18'/>
-  <circle cx='40' cy='40' r='3' fill='none' stroke='black' stroke-width='0.7' opacity='0.16'/>
-  <circle cx='40' cy='40' r='1.4' fill='black' opacity='0.22'/>
-  <path d='M40,33 Q44,36.5 40,40 Q36,36.5 40,33Z' fill='black' opacity='0.1'/>
-  <path d='M40,47 Q44,43.5 40,40 Q36,43.5 40,47Z' fill='black' opacity='0.1'/>
-  <path d='M33,40 Q36.5,44 40,40 Q36.5,36 33,40Z' fill='black' opacity='0.1'/>
-  <path d='M47,40 Q43.5,44 40,40 Q43.5,36 47,40Z' fill='black' opacity='0.1'/>
-  <circle cx='0' cy='0' r='2.8' fill='black' opacity='0.22'/>
-  <circle cx='80' cy='0' r='2.8' fill='black' opacity='0.22'/>
-  <circle cx='0' cy='80' r='2.8' fill='black' opacity='0.22'/>
-  <circle cx='80' cy='80' r='2.8' fill='black' opacity='0.22'/>
-  <circle cx='40' cy='0' r='2.2' fill='black' opacity='0.18'/>
-  <circle cx='0' cy='40' r='2.2' fill='black' opacity='0.18'/>
-  <circle cx='80' cy='40' r='2.2' fill='black' opacity='0.18'/>
-  <circle cx='40' cy='80' r='2.2' fill='black' opacity='0.18'/>
-</svg>`;
-
-const LACE_URL = `url("data:image/svg+xml,${encodeURIComponent(LACE_SVG)}")`;
-
 export default function LandingPage() {
   const [inviteUrl, setInviteUrl] = useState("/api/public/invite-url");
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
@@ -76,14 +50,15 @@ export default function LandingPage() {
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       style={{
-        background: "#fff",
         height: "100vh",
         width: "100vw",
         overflow: "hidden",
         display: "flex",
         position: "relative",
-        backgroundImage: LACE_URL,
-        backgroundSize: "80px 80px",
+        backgroundImage: `linear-gradient(rgba(255,255,255,0.88), rgba(255,255,255,0.88)), url('/lace-texture.webp')`,
+        backgroundSize: "auto, 420px auto",
+        backgroundRepeat: "repeat",
+        backgroundColor: "#fff",
       }}
     >
       {/* Left — text */}
