@@ -1,0 +1,43 @@
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+1:09:54 PM [express] serving on port 10000
+1:09:54 PM [alfie] [Alfie] Attempting Discord login…
+1:09:54 PM [keep-alive] Keep-alive active → pinging https://alfie-yql7.onrender.com/health every 10 min
+1:09:55 PM [alfie] [Alfie] Logged in as Alessa#6226
+1:09:55 PM [discord] [Music] Local Lavalink node configured at lavalink.endministrator.site:443 — public pool has 9 nodes as fallback.
+1:09:55 PM [discord] [Music] Initialising Lavalink with nodes: local, jirayu-ssl, jirayu, serenetia-v4-ssl, serenetia-v4, serenetia-ssl, serenetia, millohost, nyxbot-sg1, nyxbot-sg2
+(node:83) DeprecationWarning: The ready event has been renamed to clientReady to distinguish it from the gateway READY event and will only emit under that name in v15. Please use clientReady instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+1:09:56 PM [alfie] [Alfie] Slash commands registered in Dumpster Fire
+1:09:56 PM [discord] [Music] Lavalink node "jirayu" connected.
+1:09:56 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+1:09:56 PM [discord] [Music] Lavalink node "serenetia-v4" connected.
+1:09:56 PM [discord] [Music] Lavalink node "local" connected.
+1:09:56 PM [discord] [Music] Lavalink node "serenetia-v4-ssl" connected.
+1:09:56 PM [discord] [Music] Lavalink node "serenetia" connected.
+1:09:56 PM [alfie] [Alfie] Slash commands registered in Doro Pharmaceuticals
+1:09:57 PM [discord] [Music] Lavalink node "serenetia-ssl" connected.
+1:09:57 PM [discord] [Music] Lavalink node "nyxbot-sg1" connected.
+1:09:57 PM [discord] [Music] Lavalink node "nyxbot-sg2" connected.
+1:09:57 PM [discord] [Music] Lavalink node "millohost" connected.
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://alfie-yql7.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+1:10:56 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+1:10:56 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+1:11:56 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+1:11:56 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+1:12:56 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+1:12:57 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+1:13:57 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+1:13:57 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+1:14:57 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+1:14:57 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.
+==> Detected service running on port 10000
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+1:15:57 PM [discord] [Music] Lavalink node "jirayu-ssl" closed (1006): 
+1:15:57 PM [discord] [Music] Lavalink node "jirayu-ssl" connected.

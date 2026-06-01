@@ -37,36 +37,26 @@ const PUBLIC_LAVALINK_NODES: LavalinkNodeConfig[] = [
   { name: "nyxbot-sg2", url: "sg2-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
 ];
 
-// Custom node resolver: always try the local node first when it is healthy.
-// If the local node is overloaded (penalty >= threshold) or has no stats yet
-// after a grace period, fall through to the least-loaded public node.
+// Custom node resolver: always use the local node when it is connected.
+// The Map is keyed by node name so nodes.get() is a direct O(1) lookup.
+// We intentionally skip penalty-based bypassing for local — the standard
+// Lavalink CPU penalty formula (1.05^(100*cpu)*10-10) exceeds the old
+// threshold of 80 at just ~50% system CPU, causing healthy local nodes to
+// be skipped under normal load. Public nodes are only used when local is
+// genuinely absent from the connected pool (e.g. disconnected or not configured).
 function localFirstNodeResolver(nodes: Map<string, any>, _connection?: any): any | undefined {
+  if (!nodes.size) return undefined;
+
+  // Direct Map lookup by name — the Map key is the node name in Shoukaku v4.
+  const local = nodes.get(LOCAL_NODE_NAME);
+  if (local) return local;
+
+  // Local not connected — fall back to least-loaded public node.
   const nodeArray = [...nodes.values()];
-  if (!nodeArray.length) return undefined;
-
-  const local = nodeArray.find((n) => n.name === LOCAL_NODE_NAME);
-  if (local) {
-    if (local.stats) {
-      const penalty = Number(local.penalties ?? 0);
-      if (penalty < LOCAL_NODE_OVERLOAD_PENALTY) {
-        return local;
-      }
-      log(
-        `[Music] Local node overloaded (penalty ${penalty.toFixed(0)} ≥ ${LOCAL_NODE_OVERLOAD_PENALTY}) — routing to public pool.`,
-        "discord",
-      );
-    } else {
-      // Node just connected, no stats yet — optimistically prefer it.
-      return local;
-    }
-  }
-
-  // Least-loaded from the available pool (nodes that have reported stats).
   const withStats = nodeArray.filter((n) => n.stats);
   if (withStats.length) {
     return withStats.sort((a, b) => Number(a.penalties ?? 0) - Number(b.penalties ?? 0))[0];
   }
-
   return nodeArray[0];
 }
 
@@ -1031,11 +1021,14 @@ async function resolveSearchMultiple(node: any, query: string, limit: number): P
 }
 
 // If the ideal node returns nothing, walk every connected node until we find results.
-// This prevents a single cycling/blocked node from killing all searches.
+// Local node is tried first (direct Map lookup), then the rest in insertion order.
 async function resolveSearchAnyNode(query: string): Promise<any | null> {
   if (!shoukaku) return null;
-  const nodes = [...(shoukaku.nodes as Map<string, any>).values()];
-  for (const node of nodes) {
+  const nodeMap = shoukaku.nodes as Map<string, any>;
+  const local = nodeMap.get(LOCAL_NODE_NAME);
+  const rest = [...nodeMap.values()].filter(n => n !== local);
+  const ordered = local ? [local, ...rest] : rest;
+  for (const node of ordered) {
     try {
       const result = await resolveSearch(node, query);
       if (result) return result;
@@ -1046,8 +1039,11 @@ async function resolveSearchAnyNode(query: string): Promise<any | null> {
 
 async function resolveSearchMultipleAnyNode(query: string, limit: number): Promise<any[]> {
   if (!shoukaku) return [];
-  const nodes = [...(shoukaku.nodes as Map<string, any>).values()];
-  for (const node of nodes) {
+  const nodeMap = shoukaku.nodes as Map<string, any>;
+  const local = nodeMap.get(LOCAL_NODE_NAME);
+  const rest = [...nodeMap.values()].filter(n => n !== local);
+  const ordered = local ? [local, ...rest] : rest;
+  for (const node of ordered) {
     try {
       const result = await resolveSearchMultiple(node, query, limit);
       if (result.length) return result;
