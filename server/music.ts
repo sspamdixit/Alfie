@@ -770,9 +770,27 @@ async function attemptRecovery(
     textNotifyCallback?.(guildId, q.textChannelId, `playback hiccup on **${track.title}** — trying to recover…`);
   }
 
+  // On exception (not stuck), the encoded token may be stale or node-specific —
+  // especially when the Lavalink node has just cycled (1006 close/reconnect).
+  // Re-resolve the track to get a fresh encoded value before replaying.
+  let encodedToPlay = track.encoded;
+  if (cause === "exception" && track.uri) {
+    try {
+      const fresh = await resolveTrack(track.uri, track.requestedBy);
+      if (fresh?.encoded) {
+        encodedToPlay = fresh.encoded;
+        // Keep the queue entry up to date so subsequent recoveries also get the fresh token.
+        track.encoded = fresh.encoded;
+        log(`[Music] Re-resolved fresh encoded for "${track.title}" in guild ${guildId}.`, "discord");
+      }
+    } catch (err: any) {
+      log(`[Music] Re-resolve failed for "${track.title}" in guild ${guildId}: ${err.message} — using cached encoded.`, "discord");
+    }
+  }
+
   try {
     await resetPlayerFilters(player, guildId);
-    await player.playTrack({ track: { encoded: track.encoded } });
+    await player.playTrack({ track: { encoded: encodedToPlay } });
     await player.setGlobalVolume(q.volume);
     if (resumeFromMs > 0 && !track.isStream) {
       try {
