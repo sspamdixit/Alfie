@@ -823,6 +823,24 @@ export interface SearchResult {
   isStream: boolean;
 }
 
+// ── Autocomplete result cache ─────────────────────────────────────────────────
+// Stores the exact track URIs returned during autocomplete so the play command
+// can resolve the precise track the user picked, not a fresh re-search.
+interface AcCacheEntry { items: Array<{ uri: string; text: string }>; exp: number; }
+const _acCache = new Map<string, AcCacheEntry>();
+
+export function acCacheStore(key: string, items: Array<{ uri: string; text: string }>): void {
+  _acCache.set(key, { items, exp: Date.now() + 120_000 });
+  const now = Date.now();
+  for (const [k, v] of _acCache) if (v.exp < now) _acCache.delete(k);
+}
+
+export function acCacheLookup(key: string, idx: number): { uri: string; text: string } | null {
+  const e = _acCache.get(key);
+  if (!e || e.exp < Date.now()) return null;
+  return e.items[idx] ?? null;
+}
+
 export async function searchTracks(query: string, limit = 5): Promise<SearchResult[]> {
   if (!shoukaku) return [];
 
@@ -957,6 +975,7 @@ async function spotifyFallbackRaw(url: string): Promise<any | null> {
 export async function resolveTrack(
   query: string,
   requestedBy: string,
+  fallbackQuery?: string,   // text search fallback when URI resolution fails
 ): Promise<QueueTrack | null> {
   if (!shoukaku) throw new Error("Music not initialised.");
 
@@ -1013,6 +1032,11 @@ export async function resolveTrack(
             }
           } catch { /* try next */ }
         }
+      }
+
+      // URI resolution fully failed — if caller gave us a text fallback, use it
+      if (!raw && fallbackQuery) {
+        raw = await resolveSearchAnyNode(fallbackQuery);
       }
     }
   } else {

@@ -22,6 +22,8 @@ import {
   resolveTrack,
   resolvePlaylist,
   searchTracks,
+  acCacheStore,
+  acCacheLookup,
   joinAndPlay,
   joinAndPlayMultiple,
   addToFront,
@@ -554,24 +556,31 @@ export async function startAlfie(): Promise<void> {
       try {
         const results = await searchTracks(focused, 12);
         const seen = new Set<string>();
-        const choices = results
-          .map((t) => {
-            const label = truncateDiscordText(`${t.title} — ${t.author}`, 100);
-            const searchVal = truncateDiscordText(
-              t.author ? `${t.author} - ${t.title}` : t.title,
-              100,
-            );
-            return { name: label, value: searchVal };
-          })
-          .filter(({ value }) => {
-            // Deduplicate by normalised value (same title+author from diff sources)
-            const key = value.toLowerCase().replace(/\s+/g, " ").trim();
-            if (seen.has(key)) return false;
+        const dedupedItems: Array<{ uri: string; text: string; label: string }> = [];
+        for (const t of results) {
+          const text = truncateDiscordText(
+            t.author ? `${t.author} - ${t.title}` : t.title, 90,
+          );
+          const key = text.toLowerCase().trim();
+          if (!seen.has(key)) {
             seen.add(key);
-            return true;
-          })
-          .slice(0, 8);
-        await interaction.respond(choices);
+            dedupedItems.push({
+              uri: t.uri,
+              text,
+              label: truncateDiscordText(`${t.title} — ${t.author}`, 100),
+            });
+          }
+          if (dedupedItems.length >= 8) break;
+        }
+        // Cache so /play can resolve the exact track, not a fresh re-search
+        const acKey = `${interaction.guildId}:${interaction.user.id}`;
+        acCacheStore(acKey, dedupedItems);
+        await interaction.respond(
+          dedupedItems.map((item, i) => ({
+            name: item.label,
+            value: `ac:${i}|${item.text}`.slice(0, 100),
+          })),
+        );
       } catch { await interaction.respond([]); }
       return;
     }
@@ -751,14 +760,31 @@ export async function startAlfie(): Promise<void> {
     if (!guildId) { await replyEph("music only works in servers~ sorry ♡"); return; }
 
     if (commandName === "play") {
-      const query = interaction.options.getString("query", true);
+      let query = interaction.options.getString("query", true);
+      let acFallback: string | undefined;
+
+      // Decode autocomplete cache reference: "ac:N|fallback text"
+      if (query.startsWith("ac:")) {
+        const pipeIdx = query.indexOf("|");
+        const idx = parseInt(query.slice(3, pipeIdx === -1 ? undefined : pipeIdx));
+        const fallbackText = pipeIdx !== -1 ? query.slice(pipeIdx + 1) : "";
+        const cached = acCacheLookup(`${guildId}:${interaction.user.id}`, idx);
+        if (cached) {
+          query = cached.uri;      // resolve by the exact URI we found in autocomplete
+          acFallback = cached.text; // fall back to text search if URI is blocked
+        } else {
+          query = fallbackText;    // cache expired — use embedded fallback text
+        }
+      }
+
       const member = interaction.guild?.members.cache.get(interaction.user.id);
       const voiceChannel = member?.voice?.channel;
       if (!voiceChannel) { await replyEph("join a voice channel first~ ehehe"); return; }
       await interaction.deferReply();
       try {
         const isUrl = /^https?:\/\//i.test(query);
-        if (isUrl) {
+        // Autocomplete selections always resolve as single tracks even if URI looks like a URL
+        if (isUrl && !acFallback) {
           const { tracks, playlistName } = await resolvePlaylist(query, interaction.user.username);
           if (!tracks.length) { await interaction.editReply({ content: "couldn't find anything there~ try a different link?", allowedMentions: { parse: [] } }); return; }
           if (tracks.length === 1) {
@@ -776,7 +802,8 @@ export async function startAlfie(): Promise<void> {
             await interaction.editReply({ content: result === "playing" ? `playing playlist **${playlistName ?? "untitled"}**~ ${tracks.length} tracks loaded yay~! ♡` : `queued playlist **${playlistName ?? "untitled"}**~ ${tracks.length} tracks added ♡`, allowedMentions: { parse: [] } });
           }
         } else {
-          const track = await resolveTrack(query, interaction.user.username);
+          // Single-track path: text query OR autocomplete URI (with fallback)
+          const track = await resolveTrack(query, interaction.user.username, acFallback);
           if (!track) { await interaction.editReply({ content: "couldn't find that~ try something else?", allowedMentions: { parse: [] } }); return; }
           const result = await joinAndPlay(guildId, voiceChannel.id, interaction.channelId, track, interaction.guild?.shardId ?? 0);
           if (result === "playing") {
