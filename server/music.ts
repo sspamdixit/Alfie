@@ -17,25 +17,35 @@ const LOCAL_NODE_NAME = "local";
 const LOCAL_NODE_OVERLOAD_PENALTY = 80;
 
 const PUBLIC_LAVALINK_NODES: LavalinkNodeConfig[] = [
-  // Jirayu — stable, ~99% uptime
-  { name: "jirayu-ssl", url: "lavalink.jirayu.net:443", auth: "youshallnotpass", secure: true },
-  { name: "jirayu", url: "lavalink.jirayu.net:13592", auth: "youshallnotpass", secure: false },
+  // Serenetia / AjieDev v4 — Indonesia, high uptime
+  { name: "serenetia-v4", url: "lavalinkv4.serenetia.com:443", auth: "https://dsc.gg/ajidevserver", secure: true },
+  { name: "serenetia", url: "lavalink.serenetia.com:443", auth: "https://dsc.gg/ajidevserver", secure: true },
 
-  // Serenetia / AjieDev v4 — ~99.4% uptime (SSL + non-SSL for redundancy)
-  { name: "serenetia-v4-ssl", url: "lavalinkv4.serenetia.com:443", auth: "https://dsc.gg/ajidevserver", secure: true },
-  { name: "serenetia-v4", url: "lavalinkv4.serenetia.com:80", auth: "https://dsc.gg/ajidevserver", secure: false },
-
-  // Serenetia universal (v3+v4 combined) — SSL + non-SSL
-  { name: "serenetia-ssl", url: "lavalink.serenetia.com:443", auth: "https://dsc.gg/ajidevserver", secure: true },
-  { name: "serenetia", url: "lavalink.serenetia.com:80", auth: "https://dsc.gg/ajidevserver", secure: false },
-
-  // Millohost — ~98% uptime
+  // Millohost — Indonesia
   { name: "millohost", url: "lava-v4.millohost.my.id:443", auth: "https://discord.gg/mjS5J2K3ep", secure: true },
+
+  // Darrennathanael — Indonesia
+  { name: "darren", url: "lavalink.darrennathanael.com:443", auth: "Yonkotsu!Pinggir!Pantai", secure: true },
+
+  // DevamOP — India
+  { name: "devamop", url: "lavalink.devamop.in:80", auth: "DevamOP", secure: false },
+
+  // Freelink — public community node
+  { name: "freelink", url: "freelink.mlusercontent.com:80", auth: "freelink", secure: false },
 
   // NyxBot Singapore nodes
   { name: "nyxbot-sg1", url: "sg1-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
   { name: "nyxbot-sg2", url: "sg2-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
+
+  // Jirayu — Thailand (kept last; known to cycle with 1006 closes)
+  { name: "jirayu", url: "lavalink.jirayu.net:443", auth: "youshallnotpass", secure: true },
 ];
+
+// Tracks when a node last closed abnormally. The resolver uses this to
+// deprioritize recently-closed nodes for a cooldown period so we don't
+// immediately re-land on the same flaky node after it reconnects.
+const recentlyClosedNodes = new Map<string, number>(); // nodeName → timestamp
+const NODE_CLOSE_COOLDOWN_MS = 20_000; // ignore a node for 20s after abnormal close
 
 // Custom node resolver: always use the local node when it is connected.
 // The Map is keyed by node name so nodes.get() is a direct O(1) lookup.
@@ -52,12 +62,21 @@ function localFirstNodeResolver(nodes: Map<string, any>, _connection?: any): any
   if (local) return local;
 
   // Local not connected — fall back to least-loaded public node.
+  // Nodes that closed abnormally within the cooldown window are sorted last
+  // so we don't immediately re-select a flaky node that just reconnected.
+  const now = Date.now();
   const nodeArray = [...nodes.values()];
   const withStats = nodeArray.filter((n) => n.stats);
-  if (withStats.length) {
-    return withStats.sort((a, b) => Number(a.penalties ?? 0) - Number(b.penalties ?? 0))[0];
-  }
-  return nodeArray[0];
+  const pool = withStats.length ? withStats : nodeArray;
+
+  pool.sort((a, b) => {
+    const aCooling = (recentlyClosedNodes.get(a.name) ?? 0) + NODE_CLOSE_COOLDOWN_MS > now ? 1 : 0;
+    const bCooling = (recentlyClosedNodes.get(b.name) ?? 0) + NODE_CLOSE_COOLDOWN_MS > now ? 1 : 0;
+    if (aCooling !== bCooling) return aCooling - bCooling; // cooling nodes go last
+    return Number(a.penalties ?? 0) - Number(b.penalties ?? 0);
+  });
+
+  return pool[0];
 }
 
 function parseBoolean(value: string | undefined): boolean {
@@ -229,9 +248,15 @@ export function initMusic(client: Client): void {
   shoukaku.on("error", (name, err) =>
     log(`[Music] Lavalink node "${name}" error: ${(err as Error).message}`, "discord"),
   );
-  shoukaku.on("close", (name, code, reason) =>
-    log(`[Music] Lavalink node "${name}" closed (${code}): ${reason}`, "discord"),
-  );
+  shoukaku.on("close", (name, code, reason) => {
+    log(`[Music] Lavalink node "${name}" closed (${code}): ${reason}`, "discord");
+    // Abnormal close (1006 etc.) — record for cooldown and attempt mid-song recovery.
+    // Clean closes (1000 = normal, 1001 = going away) are intentional shutdowns.
+    if (code !== 1000 && code !== 1001) {
+      recentlyClosedNodes.set(name, Date.now());
+      void handleNodeClose(name);
+    }
+  });
   shoukaku.on("disconnect", (name, count) => {
     log(`[Music] Lavalink node "${name}" disconnected (${count} players affected).`, "discord");
     void handleNodeDisconnect(name);
@@ -360,85 +385,187 @@ async function runNodeHealthCheck(): Promise<void> {
   }
 }
 
-// When a Lavalink node goes down, try to recover active queues on another node
+// Shared recovery logic: rejoin voice on the best available node, re-resolve
+// the current track for a fresh encoded token, and resume from position.
+async function recoverQueueOnNewNode(
+  guildId: string,
+  snapshot: {
+    toResume: QueueTrack | null;
+    upcomingTracks: QueueTrack[];
+    voiceChannelId: string;
+    textChannelId: string;
+    volume: number;
+    loop: LoopMode;
+    resumePositionMs: number;
+    autoplay: boolean;
+    recentSeeds: QueueTrack[];
+    recentlyPlayedUris: string[];
+  },
+): Promise<boolean> {
+  if (!shoukaku) return false;
+
+  const idealNode = shoukaku.getIdealNode();
+  if (!idealNode) return false;
+
+  // Re-resolve the current track to get a fresh encoded token.
+  // The old encoded is node-specific and expires when a node cycles.
+  let freshResume = snapshot.toResume ? { ...snapshot.toResume } : null;
+  if (freshResume?.uri) {
+    try {
+      const fresh = await resolveTrack(freshResume.uri, freshResume.requestedBy);
+      if (fresh?.encoded) {
+        freshResume.encoded = fresh.encoded;
+        log(`[Music] Re-resolved fresh encoded for "${freshResume.title}" (guild ${guildId}).`, "discord");
+      }
+    } catch { /* use cached encoded */ }
+  }
+
+  try {
+    const newPlayer = await shoukaku.joinVoiceChannel({
+      guildId,
+      channelId: snapshot.voiceChannelId,
+      shardId: 0,
+      deaf: true,
+    });
+
+    const newQueue: GuildQueue = {
+      player: newPlayer,
+      tracks: freshResume ? [freshResume, ...snapshot.upcomingTracks] : snapshot.upcomingTracks,
+      current: null,
+      volume: snapshot.volume,
+      loop: snapshot.loop,
+      voiceChannelId: snapshot.voiceChannelId,
+      textChannelId: snapshot.textChannelId,
+      resumePositionMs: snapshot.resumePositionMs,
+      autoplay: snapshot.autoplay,
+      recentSeeds: [...snapshot.recentSeeds],
+      recentlyPlayedUris: [...snapshot.recentlyPlayedUris],
+      isFetchingAutoplay: false,
+      isAdvancing: false,
+      isStopped: false,
+      recoveryAttempts: 0,
+      recoveryWindowStartedAt: 0,
+      isRecovering: false,
+      lastTrackStartedAt: 0,
+      nodeUnhealthySince: 0,
+      lastAutoMigrateAt: Date.now(),
+      isAutoMigrating: false,
+    };
+
+    attachPlayerEvents(newPlayer, guildId);
+    queues.set(guildId, newQueue);
+    await advanceQueue(newPlayer, guildId);
+    return true;
+  } catch (err: any) {
+    log(`[Music] recoverQueueOnNewNode failed for guild ${guildId}: ${err.message}`, "discord");
+    return false;
+  }
+}
+
+// Called on abnormal node close (e.g. 1006). Shoukaku will reconnect automatically,
+// but the player session on the closed node is lost — music silently stops.
+// We snapshot active queues, wait briefly for the node to stabilise, then
+// rejoin voice on a *different* node (deprioritised by recentlyClosedNodes cooldown)
+// and resume the track with a freshly resolved encoded token.
+async function handleNodeClose(nodeName: string): Promise<void> {
+  if (!shoukaku) return;
+
+  // Snapshot affected queues immediately (position is still valid on the player object).
+  type Snapshot = Parameters<typeof recoverQueueOnNewNode>[1];
+  const affected = new Map<string, Snapshot>();
+
+  for (const [guildId, queue] of queues.entries()) {
+    if (queue.isStopped) continue;
+    const playerNodeName = (queue.player as any)?.node?.name ?? (queue.player as any)?.options?.name;
+    if (playerNodeName && playerNodeName !== nodeName) continue;
+
+    const resumePositionMs = getResumePositionMs(queue, queue.current);
+    affected.set(guildId, {
+      toResume: queue.current,
+      upcomingTracks: [...queue.tracks],
+      voiceChannelId: queue.voiceChannelId,
+      textChannelId: queue.textChannelId,
+      volume: queue.volume,
+      loop: queue.loop,
+      resumePositionMs,
+      autoplay: queue.autoplay,
+      recentSeeds: [...queue.recentSeeds],
+      recentlyPlayedUris: [...queue.recentlyPlayedUris],
+    });
+
+    // Mark stopped and remove so stale player events don't interfere.
+    queue.isStopped = true;
+    queues.delete(guildId);
+  }
+
+  if (!affected.size) return;
+
+  log(`[Music] Node "${nodeName}" closed — recovering ${affected.size} guild(s).`, "discord");
+
+  // Wait for the closed node to finish its reconnect cycle before we try
+  // to join voice (typically jirayu reconnects in ~1s; 2.5s gives headroom
+  // for other nodes to stabilise too). recentlyClosedNodes cooldown means
+  // the resolver will prefer any *other* available node.
+  await new Promise<void>((r) => setTimeout(r, 2500));
+
+  for (const [guildId, snapshot] of affected) {
+    // If something else already recovered this guild, skip.
+    if (queues.has(guildId)) continue;
+
+    const ok = await recoverQueueOnNewNode(guildId, snapshot);
+    if (ok) {
+      const nodeName2 = (queues.get(guildId)?.player as any)?.node?.name ?? "unknown";
+      const resumeMsg = snapshot.resumePositionMs > 0
+        ? `node hiccup — back on **${nodeName2}**, resuming from ${formatDuration(snapshot.resumePositionMs)}.`
+        : `node hiccup — back on **${nodeName2}**, resuming.`;
+      textNotifyCallback?.(guildId, snapshot.textChannelId, resumeMsg);
+      log(`[Music] Recovered guild ${guildId} after "${nodeName}" close.`, "discord");
+    } else {
+      textNotifyCallback?.(guildId, snapshot.textChannelId, "lost connection to audio — all nodes may be busy. use /play to restart.");
+      log(`[Music] Could not recover guild ${guildId} after "${nodeName}" close — no nodes available.`, "discord");
+    }
+  }
+}
+
+// When a Lavalink node goes down permanently (all reconnect attempts exhausted),
+// try to recover any still-affected queues on another node.
 async function handleNodeDisconnect(nodeName: string): Promise<void> {
   if (!shoukaku) return;
 
   for (const [guildId, queue] of queues.entries()) {
-    // Check if this queue's player was on the disconnected node
     const playerNodeName = (queue.player as any)?.node?.name ?? (queue.player as any)?.options?.name;
     if (playerNodeName && playerNodeName !== nodeName) continue;
-
-    // Also skip already-stopped queues
     if (queue.isStopped) continue;
 
     log(`[Music] Attempting recovery for guild ${guildId} after node "${nodeName}" disconnect.`, "discord");
 
-    const toResume = queue.current;
-    const upcomingTracks = [...queue.tracks];
-    const { voiceChannelId, textChannelId, volume, loop } = queue;
-    const resumePositionMs = getResumePositionMs(queue, toResume);
+    const snapshot = {
+      toResume: queue.current,
+      upcomingTracks: [...queue.tracks],
+      voiceChannelId: queue.voiceChannelId,
+      textChannelId: queue.textChannelId,
+      volume: queue.volume,
+      loop: queue.loop,
+      resumePositionMs: getResumePositionMs(queue, queue.current),
+      autoplay: queue.autoplay,
+      recentSeeds: [...queue.recentSeeds],
+      recentlyPlayedUris: [...queue.recentlyPlayedUris],
+    };
 
-    // Mark as stopped to prevent stale end events from interfering
     queue.isStopped = true;
     queues.delete(guildId);
 
-    // Small delay to let Shoukaku fully process the disconnect
-    await new Promise<void>((r) => setTimeout(r, 2000));
+    // Brief delay so Shoukaku finishes teardown before we rejoin.
+    await new Promise<void>((r) => setTimeout(r, 500));
 
-    // Check if another node is available
-    const idealNode = shoukaku.getIdealNode();
-    if (!idealNode) {
-      log(`[Music] No available Lavalink nodes for guild ${guildId} — cannot recover.`, "discord");
-      textNotifyCallback?.(guildId, textChannelId, "all lavalink nodes are down, can't keep playing right now. try ?play again in a bit.");
-      continue;
-    }
-
-    try {
-      const newPlayer = await shoukaku.joinVoiceChannel({
-        guildId,
-        channelId: voiceChannelId,
-        shardId: 0,
-        deaf: true,
-      });
-
-      const newQueue: GuildQueue = {
-        player: newPlayer,
-        tracks: toResume ? [toResume, ...upcomingTracks] : upcomingTracks,
-        current: null,
-        volume,
-        loop,
-        voiceChannelId,
-        textChannelId,
-        resumePositionMs,
-        autoplay: queue.autoplay,
-        recentSeeds: [...queue.recentSeeds],
-        recentlyPlayedUris: [...queue.recentlyPlayedUris],
-        isFetchingAutoplay: false,
-        isAdvancing: false,
-        isStopped: false,
-        recoveryAttempts: 0,
-        recoveryWindowStartedAt: 0,
-        isRecovering: false,
-        lastTrackStartedAt: 0,
-        nodeUnhealthySince: 0,
-        lastAutoMigrateAt: Date.now(),
-        isAutoMigrating: false,
-      };
-
-      attachPlayerEvents(newPlayer, guildId);
-      queues.set(guildId, newQueue);
-
-      log(`[Music] Recovery: rejoined voice channel for guild ${guildId}.`, "discord");
-      const resumeMessage = resumePositionMs > 0
-        ? `node dropped — reconnected and resuming from ${formatDuration(resumePositionMs)}.`
+    const ok = await recoverQueueOnNewNode(guildId, snapshot);
+    if (ok) {
+      const resumeMsg = snapshot.resumePositionMs > 0
+        ? `node dropped — reconnected and resuming from ${formatDuration(snapshot.resumePositionMs)}.`
         : "node dropped — reconnected and resuming queue.";
-      textNotifyCallback?.(guildId, textChannelId, resumeMessage);
-
-      await advanceQueue(newPlayer, guildId);
-    } catch (err: any) {
-      log(`[Music] Recovery failed for guild ${guildId}: ${err.message}`, "discord");
-      textNotifyCallback?.(guildId, textChannelId, "tried to recover but the reconnect failed. use ?play to restart.");
+      textNotifyCallback?.(guildId, snapshot.textChannelId, resumeMsg);
+    } else {
+      textNotifyCallback?.(guildId, snapshot.textChannelId, "tried to recover but all nodes are down. use /play to restart.");
     }
   }
 }
