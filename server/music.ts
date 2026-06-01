@@ -76,11 +76,19 @@ function parseBoolean(value: string | undefined): boolean {
 
 function normalizeLavalinkNode(raw: any, fallbackName: string): LavalinkNodeConfig | null {
   const name = String(raw?.name || fallbackName).trim();
-  const url = String(raw?.url || raw?.host || "").trim();
+  let url = String(raw?.url || raw?.host || "").trim();
   const auth = String(raw?.auth || raw?.password || "").trim();
   const secure = typeof raw?.secure === "boolean" ? raw.secure : parseBoolean(String(raw?.secure ?? ""));
 
   if (!name || !url || !auth) return null;
+
+  // If no port is specified in the URL, default to 443 for secure connections
+  // and 2333 (standard Lavalink port) for non-secure. Without this, Shoukaku
+  // connects to port 2333 over ws:// even when secure=true, causing a 301 redirect.
+  if (!url.includes(":")) {
+    url = `${url}:${secure ? 443 : 2333}`;
+  }
+
   return { name, url, auth, secure };
 }
 
