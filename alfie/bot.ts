@@ -496,14 +496,19 @@ export async function startAlfie(): Promise<void> {
     initMusic(readyClient);
 
     setNowPlayingCallback((guildId, track, queue) => {
+      const isTTS = track.title.startsWith("[TTS]");
+
       const session = djSessions.get(guildId);
-      if (session) {
+      if (session && !isTTS) {
         onDjTrackStart(guildId, track, queue.volume, queue.player);
         const q = getQueue(guildId);
         if (q && q.tracks.length < 3) {
           void refillDjQueue(guildId, session);
         }
       }
+
+      // Don't add TTS tracks to history or post now-playing embeds
+      if (isTTS) return;
 
       const hist = trackHistory.get(guildId) ?? [];
       hist.unshift({ title: track.title, author: track.author, duration: track.duration, uri: track.uri, requestedBy: track.requestedBy, playedAt: Date.now() });

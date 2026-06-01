@@ -13,9 +13,11 @@ function buildTTSUrl(text: string): string {
     .slice(0, MAX_TTS_CHARS);
 
   const base = (
-    process.env.RENDER_EXTERNAL_URL ??
-    process.env.PUBLIC_BASE_URL ??
-    `http://localhost:${process.env.PORT ?? 5000}`
+    process.env.REPLIT_DEV_DOMAIN
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+      : process.env.RENDER_EXTERNAL_URL ??
+        process.env.PUBLIC_BASE_URL ??
+        `http://localhost:${process.env.PORT ?? 5000}`
   ).replace(/\/$/, "");
 
   return `${base}/tts-audio?text=${encodeURIComponent(cleaned)}`;
