@@ -967,17 +967,54 @@ function isBadTrack(raw: any): boolean {
   return isDeezerTrack(raw) || isStreamTrack(raw);
 }
 
+// Score how closely a Lavalink track result matches the user's query.
+// Normalises both sides to lowercase word tokens, counts overlapping words.
+// Returns a count (higher = better match). Used to pick the best result
+// across multiple search sources so obscure/deep-cut tracks aren't drowned
+// out by a YouTube Music "close enough" hit.
+function trackRelevanceScore(query: string, raw: any): number {
+  const normalize = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9]/g, " ").split(/\s+/).filter(w => w.length > 1);
+  const queryWords = normalize(query);
+  if (!queryWords.length) return 0;
+  const resultWords = new Set([
+    ...normalize(raw?.info?.title ?? ""),
+    ...normalize(raw?.info?.author ?? ""),
+  ]);
+  return queryWords.filter(w => resultWords.has(w)).length;
+}
+
+// Pick the candidate with the highest relevance score (ties broken by order).
+function bestMatchingTrack(query: string, candidates: any[]): any {
+  if (candidates.length === 1) return candidates[0];
+  let best = candidates[0];
+  let bestScore = trackRelevanceScore(query, best);
+  for (let i = 1; i < candidates.length; i++) {
+    const score = trackRelevanceScore(query, candidates[i]);
+    if (score > bestScore) { bestScore = score; best = candidates[i]; }
+  }
+  return best;
+}
+
+// Query all search sources in parallel and return the best-matching result.
+// Running in parallel means no extra wall-clock time vs. the slowest source;
+// scoring means a deep-cut on SoundCloud wins over a wrong YouTube Music hit.
 async function resolveSearch(node: any, query: string): Promise<any | null> {
-  for (const prefix of SEARCH_PREFIXES) {
-    try {
+  const settled = await Promise.allSettled(
+    SEARCH_PREFIXES.map(async (prefix) => {
       const result = await node.rest.resolve(`${prefix}:${query}`);
       if (result?.loadType === "search") {
         const tracks = (result.data as any[]).filter(t => !isBadTrack(t));
-        if (tracks.length) return tracks[0];
+        return tracks[0] ?? null;
       }
-    } catch { /* try next source */ }
-  }
-  return null;
+      return null;
+    }),
+  );
+  const candidates = settled
+    .map(r => (r.status === "fulfilled" ? r.value : null))
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+  if (!candidates.length) return null;
+  return bestMatchingTrack(query, candidates);
 }
 
 async function resolveSearchMultiple(node: any, query: string, limit: number): Promise<any[]> {
@@ -1242,6 +1279,7 @@ export async function joinAndPlay(
   textChannelId: string,
   track: QueueTrack,
   shardId = 0,
+  forceQueue = false,
 ): Promise<"playing" | "queued"> {
   if (!shoukaku) throw new Error("Music not initialised.");
 
@@ -1261,8 +1299,10 @@ export async function joinAndPlay(
     }
   }
 
-  // If currently advancing or something is playing/paused, add to queue
-  if (queue.current || queue.player.paused || queue.isAdvancing) {
+  // forceQueue is set when the caller snapshotted an active session before an
+  // async resolution step. The session may have ended during resolution (race),
+  // so we honour the caller's intent and queue rather than interrupt.
+  if (forceQueue || queue.current || queue.player.paused || queue.isAdvancing) {
     queue.tracks.push(track);
     return "queued";
   }

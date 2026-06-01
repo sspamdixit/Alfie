@@ -788,13 +788,26 @@ export async function startAlfie(): Promise<void> {
       if (!voiceChannel) { await replyEph("join a voice channel first~ ehehe"); return; }
       await interaction.deferReply();
       try {
+        // Snapshot whether a session is actively playing RIGHT NOW, before any
+        // async resolution. Track resolution can take several seconds on obscure
+        // songs (trying multiple nodes/sources). If the current song ends during
+        // that window, queue.current becomes null and the new track would start
+        // immediately instead of queuing — overriding the listener's session.
+        // Passing forceQueue=true to joinAndPlay prevents that race.
+        const preResolveQueue = getQueue(guildId);
+        const wasActivePlaying = !!(
+          preResolveQueue &&
+          !preResolveQueue.isStopped &&
+          (preResolveQueue.current || preResolveQueue.player.paused || preResolveQueue.isAdvancing)
+        );
+
         const isUrl = /^https?:\/\//i.test(query);
         // Autocomplete selections always resolve as single tracks even if URI looks like a URL
         if (isUrl && !acFallback) {
           const { tracks, playlistName } = await resolvePlaylist(query, interaction.user.username);
           if (!tracks.length) { await interaction.editReply({ content: "couldn't find anything there~ try a different link?", allowedMentions: { parse: [] } }); return; }
           if (tracks.length === 1) {
-            const result = await joinAndPlay(guildId, voiceChannel.id, interaction.channelId, tracks[0], interaction.guild?.shardId ?? 0);
+            const result = await joinAndPlay(guildId, voiceChannel.id, interaction.channelId, tracks[0], interaction.guild?.shardId ?? 0, wasActivePlaying);
             if (result === "playing") {
               const q = getQueue(guildId)!;
               const sent = await interaction.editReply({ embeds: [await buildNowPlayingEmbed(tracks[0], q)], components: [buildMusicButtons(false)], allowedMentions: { parse: [] } });
@@ -811,7 +824,7 @@ export async function startAlfie(): Promise<void> {
           // Single-track path: text query OR autocomplete URI (with fallback)
           const track = await resolveTrack(query, interaction.user.username, acFallback);
           if (!track) { await interaction.editReply({ content: "couldn't find that~ try something else?", allowedMentions: { parse: [] } }); return; }
-          const result = await joinAndPlay(guildId, voiceChannel.id, interaction.channelId, track, interaction.guild?.shardId ?? 0);
+          const result = await joinAndPlay(guildId, voiceChannel.id, interaction.channelId, track, interaction.guild?.shardId ?? 0, wasActivePlaying);
           if (result === "playing") {
             const q = getQueue(guildId)!;
             const sent = await interaction.editReply({ embeds: [await buildNowPlayingEmbed(track, q)], components: [buildMusicButtons(false)], allowedMentions: { parse: [] } });
