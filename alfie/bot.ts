@@ -552,20 +552,26 @@ export async function startAlfie(): Promise<void> {
       const focused = interaction.options.getFocused();
       if (!focused || focused.length < 2) { await interaction.respond([]); return; }
       try {
-        const results = await searchTracks(focused, 8);
-        await interaction.respond(
-          results.map((t) => {
+        const results = await searchTracks(focused, 12);
+        const seen = new Set<string>();
+        const choices = results
+          .map((t) => {
             const label = truncateDiscordText(`${t.title} — ${t.author}`, 100);
-            // Use a text query as the value so /play always goes through the
-            // multi-source text search path instead of resolving the YouTube URL
-            // directly (which public nodes block).
             const searchVal = truncateDiscordText(
               t.author ? `${t.author} - ${t.title}` : t.title,
               100,
             );
             return { name: label, value: searchVal };
-          }),
-        );
+          })
+          .filter(({ value }) => {
+            // Deduplicate by normalised value (same title+author from diff sources)
+            const key = value.toLowerCase().replace(/\s+/g, " ").trim();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .slice(0, 8);
+        await interaction.respond(choices);
       } catch { await interaction.respond([]); }
       return;
     }
