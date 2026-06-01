@@ -53,3 +53,5 @@ timeoutMs = 20000
 
 [userenv.shared]
 ENABLE_ALFIE = "true"
+LAVALINK_URL = "lavalink.endministrator.site"
+LAVALINK_SECURE = "true"
