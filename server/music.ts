@@ -1131,26 +1131,32 @@ export async function resolveTrack(
           }
         } catch { /* try next */ }
       }
-      // Last resort: try other nodes with the raw URL
-      if (!raw) {
-        const nodes = [...(shoukaku!.nodes as Map<string, any>).values()];
-        for (const n of nodes) {
-          if (n === node) continue;
-          try {
-            const r = await n.rest.resolve(query);
-            if (r?.loadType === "track") { raw = r.data; break; }
-            if (r?.loadType === "search") {
-              const tracks = (r.data as any[]).filter(t => !isDeezerTrack(t));
-              if (tracks.length) { raw = tracks[0]; break; }
-            }
-          } catch { /* try next */ }
-        }
-      }
+    }
 
-      // URI resolution fully failed — if caller gave us a text fallback, use it
-      if (!raw && fallbackQuery) {
-        raw = await resolveSearchAnyNode(fallbackQuery);
+    // Generic HTTP/HTTPS URL fallback (covers TTS proxy, direct audio files, etc.).
+    // If the ideal node couldn't resolve it, walk all other nodes. Public Lavalink
+    // nodes vary in what HTTP sources they accept; local is usually most permissive.
+    if (!raw) {
+      const nodeMap = shoukaku!.nodes as Map<string, any>;
+      // Try local node first, then the rest
+      const local = nodeMap.get(LOCAL_NODE_NAME);
+      const others = [...nodeMap.values()].filter(n => n !== node && n !== local);
+      const fallbackNodes = local && local !== node ? [local, ...others] : others;
+      for (const n of fallbackNodes) {
+        try {
+          const r = await n.rest.resolve(query);
+          if (r?.loadType === "track") { raw = r.data; break; }
+          if (r?.loadType === "search") {
+            const tracks = (r.data as any[]).filter(t => !isDeezerTrack(t));
+            if (tracks.length) { raw = tracks[0]; break; }
+          }
+        } catch { /* try next */ }
       }
+    }
+
+    // URI resolution fully failed — if caller gave us a text fallback, use it
+    if (!raw && fallbackQuery) {
+      raw = await resolveSearchAnyNode(fallbackQuery);
     }
   } else {
     // Non-URL: cascade ytmsearch → ytsearch → scsearch across all nodes
