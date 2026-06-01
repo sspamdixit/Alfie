@@ -793,10 +793,19 @@ function attachPlayerEvents(player: Player, guildId: string): void {
     const q = queues.get(guildId);
     if (!q || q.isStopped) return;
 
-    // Deezer stream failures are permanent (LavaSrc mis-routes to Deezer) —
-    // skip immediately instead of wasting 3 recovery attempts on the same bad track.
-    if (/deezer/i.test(msg)) {
-      log(`[Music] Deezer stream failure — skipping track immediately.`, "discord");
+    // Permanently unplayable track patterns — skip immediately instead of
+    // wasting 3 recovery attempts replaying the same broken source.
+    // Covers: Deezer (stream metadata), LavaSrc provider errors, ended live streams.
+    const isUnrecoverable =
+      /deezer/i.test(msg) ||
+      q.current?.isStream === true ||
+      /stream.{0,30}(metadata|identifier|missing|ended|unavailable)/i.test(msg) ||
+      /not (playable|available|found)/i.test(msg) ||
+      /no (track|song|result)/i.test(msg) ||
+      /\b(403|404|410)\b/.test(msg);
+
+    if (isUnrecoverable) {
+      log(`[Music] Unrecoverable track error ("${msg}") — skipping immediately.`, "discord");
       void advanceQueue(player, guildId);
       return;
     }
@@ -880,11 +889,18 @@ export async function searchTracks(query: string, limit = 5): Promise<SearchResu
 // Try multiple search sources so YouTube rate-limits don't silently kill search
 const SEARCH_PREFIXES = ["ytmsearch", "ytsearch", "scsearch"];
 
-// LavaSrc on public nodes routes ytmsearch: through Deezer for audio — those
-// streams frequently fail with "Deezer stream metadata is missing". Filter them.
+// LavaSrc on public nodes routes ytmsearch: through Deezer/radio endpoints.
+// Deezer tracks fail with "stream metadata missing"; stream tracks are live-only.
+// Both should be excluded from search results entirely.
 function isDeezerTrack(raw: any): boolean {
   const uri: string = raw?.info?.uri ?? "";
   return /deezer\.com/i.test(uri) || uri.startsWith("dz:");
+}
+function isStreamTrack(raw: any): boolean {
+  return raw?.info?.isStream === true;
+}
+function isBadTrack(raw: any): boolean {
+  return isDeezerTrack(raw) || isStreamTrack(raw);
 }
 
 async function resolveSearch(node: any, query: string): Promise<any | null> {
@@ -892,7 +908,7 @@ async function resolveSearch(node: any, query: string): Promise<any | null> {
     try {
       const result = await node.rest.resolve(`${prefix}:${query}`);
       if (result?.loadType === "search") {
-        const tracks = (result.data as any[]).filter(t => !isDeezerTrack(t));
+        const tracks = (result.data as any[]).filter(t => !isBadTrack(t));
         if (tracks.length) return tracks[0];
       }
     } catch { /* try next source */ }
@@ -905,7 +921,7 @@ async function resolveSearchMultiple(node: any, query: string, limit: number): P
     try {
       const result = await node.rest.resolve(`${prefix}:${query}`);
       if (result?.loadType === "search") {
-        const tracks = (result.data as any[]).filter(t => !isDeezerTrack(t));
+        const tracks = (result.data as any[]).filter(t => !isBadTrack(t));
         if (tracks.length) return tracks.slice(0, limit);
       }
     } catch { /* try next source */ }
