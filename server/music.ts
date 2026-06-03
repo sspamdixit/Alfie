@@ -19,23 +19,15 @@ const LOCAL_NODE_OVERLOAD_PENALTY = 80;
 const PUBLIC_LAVALINK_NODES: LavalinkNodeConfig[] = [
   // Serenetia / AjieDev v4 — Indonesia, high uptime
   { name: "serenetia-v4", url: "lavalinkv4.serenetia.com:443", auth: "https://dsc.gg/ajidevserver", secure: true },
-  { name: "serenetia", url: "lavalink.serenetia.com:443", auth: "https://dsc.gg/ajidevserver", secure: true },
-
-  // Millohost — Indonesia
-  { name: "millohost", url: "lava-v4.millohost.my.id:443", auth: "https://discord.gg/mjS5J2K3ep", secure: true },
 
   // Darrennathanael — Indonesia
   { name: "darren", url: "lavalink.darrennathanael.com:443", auth: "Yonkotsu!Pinggir!Pantai", secure: true },
 
-  // DevamOP — India
+  // DevamOP — India (different region for diversity)
   { name: "devamop", url: "lavalink.devamop.in:80", auth: "DevamOP", secure: false },
 
-  // Freelink — public community node
-  { name: "freelink", url: "freelink.mlusercontent.com:80", auth: "freelink", secure: false },
-
-  // NyxBot Singapore nodes
+  // NyxBot Singapore
   { name: "nyxbot-sg1", url: "sg1-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
-  { name: "nyxbot-sg2", url: "sg2-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
 
   // Jirayu — Thailand (kept last; known to cycle with 1006 closes)
   { name: "jirayu", url: "lavalink.jirayu.net:443", auth: "youshallnotpass", secure: true },
@@ -798,25 +790,37 @@ async function advanceQueue(player: Player, guildId: string): Promise<void> {
 
       // Autoplay: when the queue runs dry, fetch similar tracks based on the last seed.
       // Only when not looping the whole queue (queue-loop is exclusive of autoplay).
+      // Kicked off as a non-blocking background Promise so the event loop isn't held
+      // while waiting for Lavalink HTTP (1-3 s). The .then() re-triggers advanceQueue
+      // once tracks arrive, before the 30-second auto-disconnect fires.
       if (q.tracks.length === 0 && q.autoplay && q.loop !== "queue" && !q.isFetchingAutoplay) {
         const seed = q.recentSeeds[q.recentSeeds.length - 1];
         if (seed) {
           q.isFetchingAutoplay = true;
-          try {
-            const exclude = new Set(q.recentlyPlayedUris);
-            const fetched = await fetchAutoplayTracks(seed, 5, exclude, guildId, q.textChannelId);
-            if (fetched.length) {
-              q.tracks.push(...fetched);
-              log(`[Music:autoplay] Queued ${fetched.length} tracks based on "${seed.title}" in guild ${guildId}.`, "discord");
-              textNotifyCallback?.(guildId, q.textChannelId, `🎶 autoplay queued **${fetched.length}** similar tracks.`);
-            } else {
-              log(`[Music:autoplay] No similar tracks found for "${seed.title}" in guild ${guildId}.`, "discord");
-            }
-          } catch (err: any) {
-            log(`[Music:autoplay] Fetch failed in guild ${guildId}: ${err.message}`, "discord");
-          } finally {
-            q.isFetchingAutoplay = false;
-          }
+          const exclude = new Set(q.recentlyPlayedUris);
+          fetchAutoplayTracks(seed, 5, exclude, guildId, q.textChannelId)
+            .then((fetched) => {
+              const liveQ = queues.get(guildId);
+              if (!liveQ || liveQ.isStopped) return;
+              if (fetched.length) {
+                liveQ.tracks.push(...fetched);
+                log(`[Music:autoplay] Queued ${fetched.length} tracks based on "${seed.title}" in guild ${guildId}.`, "discord");
+                textNotifyCallback?.(guildId, liveQ.textChannelId, `🎶 autoplay queued **${fetched.length}** similar tracks.`);
+                // Re-trigger advance if nothing is already playing
+                if (!liveQ.current && !liveQ.isAdvancing) {
+                  void advanceQueue(player, guildId);
+                }
+              } else {
+                log(`[Music:autoplay] No similar tracks found for "${seed.title}" in guild ${guildId}.`, "discord");
+              }
+            })
+            .catch((err: any) => {
+              log(`[Music:autoplay] Fetch failed in guild ${guildId}: ${err.message}`, "discord");
+            })
+            .finally(() => {
+              const liveQ = queues.get(guildId);
+              if (liveQ) liveQ.isFetchingAutoplay = false;
+            });
         }
       }
 

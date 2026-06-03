@@ -180,7 +180,7 @@ async function fetchItunesAlbumArt(track: QueueTrack): Promise<AlbumArtResult | 
   url.searchParams.set("term", term);
 
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.timeout(3_000) });
     if (!response.ok) return null;
 
     const data = await response.json() as {
@@ -216,10 +216,7 @@ function getAlbumArt(track: QueueTrack): Promise<AlbumArtResult | null> {
     albumArtCache.set(key, cached);
     return cached;
   }
-  const pending = fetchItunesAlbumArt(track).then((r) => {
-    if (!r) albumArtCache.delete(key);
-    return r;
-  });
+  const pending = fetchItunesAlbumArt(track);
   albumArtCache.set(key, pending);
   if (albumArtCache.size > ALBUM_ART_CACHE_LIMIT) {
     const oldest = albumArtCache.keys().next().value;
@@ -286,7 +283,7 @@ function scheduleNowPlayingProgressUpdates(message: Message, guildId: string, tr
       }
       try {
         await message.edit({
-          embeds: [await buildNowPlayingEmbed(queue.current!, queue)],
+          embeds: [buildNowPlayingEmbedFast(queue.current!, queue)],
           components: [buildMusicButtons(queue.player.paused)],
           allowedMentions: { parse: [] },
         });
