@@ -1,10 +1,20 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 
+// ── Misa Amane palette ─────────────────────────────────────────────────────
+const VOID     = "#0c0c0c";                       // near-black
+const INK      = "#f5f0ec";                       // warm white — primary text
+const DIM      = "rgba(245,240,236,0.45)";        // secondary text
+const GHOST    = "rgba(245,240,236,0.03)";        // card fill
+const RULE     = "rgba(245,240,236,0.10)";        // dividers / borders
+const CRIMSON  = "#c41e3a";                       // gothic red accent
+const CRIMSON_MID = "rgba(196,30,58,0.55)";       // mid-opacity red
+const CRIMSON_DIM = "rgba(196,30,58,0.18)";       // subtle red tint
+
 const LACE_BG = {
-  backgroundImage: `linear-gradient(rgba(255,255,255,0.88), rgba(255,255,255,0.88)), url('/lace-texture.webp')`,
+  backgroundImage: `linear-gradient(rgba(12,12,12,0.91), rgba(12,12,12,0.91)), url('/lace-texture.webp')`,
   backgroundSize: "auto, 420px auto",
   backgroundRepeat: "repeat" as const,
-  backgroundColor: "#fff",
+  backgroundColor: VOID,
 };
 
 const SERIF = "'Cinzel', serif";
@@ -12,7 +22,7 @@ const SERIF = "'Cinzel', serif";
 const FEATURES = [
   {
     title: "Stream Anything",
-    desc: "YouTube, SoundCloud, and Spotify links. Search by name. Alessa finds it and queues it immediately.",
+    desc: "YouTube, SoundCloud, and Spotify links. Search by name. Alfie finds it and queues it immediately.",
   },
   {
     title: "Full Queue Control",
@@ -28,7 +38,7 @@ const FEATURES = [
   },
   {
     title: "Autoplay",
-    desc: "When your queue runs dry, Alessa picks up similar music automatically. The party doesn't stop.",
+    desc: "When your queue runs dry, Alfie picks up similar music automatically. The party doesn't stop.",
   },
   {
     title: "Saved Playlists",
@@ -36,7 +46,7 @@ const FEATURES = [
   },
 ];
 
-const Cross = ({ size = 12, color = "#1a1a1a", opacity = 1 }: { size?: number; color?: string; opacity?: number }) => (
+const Cross = ({ size = 12, color = CRIMSON, opacity = 1 }: { size?: number; color?: string; opacity?: number }) => (
   <svg width={size} height={size} viewBox="0 0 12 12" fill="none" style={{ opacity, flexShrink: 0, display: "block" }}>
     <rect x="5" y="0" width="2" height="12" fill={color} />
     <rect x="0" y="5" width="12" height="2" fill={color} />
@@ -108,6 +118,15 @@ export default function LandingPage() {
         onMouseLeave={handleMouseLeave}
         style={{ height: "100vh", display: "flex", position: "relative", overflow: "hidden" }}
       >
+        {/* Crimson bottom vignette — Misa-energy glow from below */}
+        <div style={{
+          position: "absolute",
+          inset: 0,
+          background: `radial-gradient(ellipse 80% 40% at 50% 110%, ${CRIMSON_DIM}, transparent 70%)`,
+          pointerEvents: "none",
+          zIndex: 1,
+        }} />
+
         {/* Left */}
         <div style={{
           flex: "0 0 48%",
@@ -120,9 +139,9 @@ export default function LandingPage() {
         }}>
           {/* Eyebrow rule */}
           <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", marginBottom: "1.8rem" }}>
-            <div style={{ width: 36, height: 1, background: "rgba(0,0,0,0.35)" }} />
-            <Cross size={11} opacity={0.55} />
-            <div style={{ width: 36, height: 1, background: "rgba(0,0,0,0.35)" }} />
+            <div style={{ width: 36, height: 1, background: CRIMSON_MID }} />
+            <Cross size={11} opacity={0.9} />
+            <div style={{ width: 36, height: 1, background: CRIMSON_MID }} />
           </div>
 
           {/* Name */}
@@ -132,11 +151,11 @@ export default function LandingPage() {
             fontSize: "clamp(3.2rem, 6.5vw, 6rem)",
             letterSpacing: "0.22em",
             textTransform: "uppercase",
-            color: "#0d0d0d",
+            color: INK,
             margin: "0 0 0.15em",
             lineHeight: 1,
           }}>
-            Alessa
+            Alfie
           </h1>
 
           {/* Label */}
@@ -146,7 +165,7 @@ export default function LandingPage() {
             fontSize: "0.62rem",
             letterSpacing: "0.42em",
             textTransform: "uppercase",
-            color: "rgba(0,0,0,0.55)",
+            color: DIM,
             margin: "0 0 1rem",
           }}>
             Discord Music Bot
@@ -157,7 +176,7 @@ export default function LandingPage() {
             fontFamily: "'Cormorant Garamond', serif",
             fontStyle: "italic",
             fontSize: "clamp(0.95rem, 1.5vw, 1.1rem)",
-            color: "rgba(0,0,0,0.52)",
+            color: DIM,
             lineHeight: 1.7,
             maxWidth: 340,
             margin: "0 0 2.5rem",
@@ -178,13 +197,13 @@ export default function LandingPage() {
                 fontSize: "0.68rem",
                 letterSpacing: "0.2em",
                 textTransform: "uppercase",
-                color: btnHover ? "#fff" : "#0d0d0d",
-                background: btnHover ? "#0d0d0d" : "transparent",
-                border: "1.5px solid #0d0d0d",
+                color: btnHover ? INK : INK,
+                background: btnHover ? CRIMSON : "transparent",
+                border: `1.5px solid ${btnHover ? CRIMSON : RULE}`,
                 padding: "13px 34px",
                 textDecoration: "none",
                 display: "inline-block",
-                transition: "background 0.22s, color 0.22s",
+                transition: "background 0.22s, border-color 0.22s",
               }}
             >
               Add to Discord
@@ -197,7 +216,7 @@ export default function LandingPage() {
                 fontSize: "0.62rem",
                 letterSpacing: "0.2em",
                 textTransform: "uppercase",
-                color: "rgba(0,0,0,0.45)",
+                color: DIM,
                 background: "transparent",
                 border: "none",
                 cursor: "pointer",
@@ -209,27 +228,37 @@ export default function LandingPage() {
             >
               See features
               <svg width="10" height="14" viewBox="0 0 10 14" fill="none">
-                <path d="M5 0v11M1 8l4 5 4-5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M5 0v11M1 8l4 5 4-5" stroke={DIM} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
           </div>
 
           {/* Bottom rule */}
           <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", marginTop: "2.2rem" }}>
-            <div style={{ width: 36, height: 1, background: "rgba(0,0,0,0.35)" }} />
-            <Cross size={11} opacity={0.55} />
-            <div style={{ width: 36, height: 1, background: "rgba(0,0,0,0.35)" }} />
+            <div style={{ width: 36, height: 1, background: CRIMSON_MID }} />
+            <Cross size={11} opacity={0.9} />
+            <div style={{ width: 36, height: 1, background: CRIMSON_MID }} />
           </div>
         </div>
 
-        {/* Right — cross */}
+        {/* Right — cross with crimson soul */}
         <div style={{
           flex: "0 0 52%",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           perspective: "900px",
+          position: "relative",
         }}>
+          {/* Crimson halo behind the cross */}
+          <div style={{
+            position: "absolute",
+            width: "55%",
+            paddingBottom: "55%",
+            borderRadius: "50%",
+            background: `radial-gradient(circle, ${CRIMSON_DIM} 0%, transparent 70%)`,
+            pointerEvents: "none",
+          }} />
           <img
             src="/cross-transparent.png"
             alt=""
@@ -241,7 +270,9 @@ export default function LandingPage() {
               pointerEvents: "none",
               transform: `perspective(900px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) translate(${offset.x * 0.5}px, ${offset.y * 0.5}px)`,
               willChange: "transform",
-              filter: "drop-shadow(0 8px 48px rgba(0,0,0,0.22)) drop-shadow(0 2px 10px rgba(0,0,0,0.14))",
+              filter: `drop-shadow(0 0 48px rgba(196,30,58,0.28)) drop-shadow(0 8px 40px rgba(0,0,0,0.9))`,
+              position: "relative",
+              zIndex: 1,
             }}
           />
         </div>
@@ -254,18 +285,18 @@ export default function LandingPage() {
         flexDirection: "column",
         justifyContent: "center",
         padding: "5vh 7vw",
-        borderTop: "1px solid rgba(0,0,0,0.15)",
+        borderTop: `1px solid ${RULE}`,
         position: "relative",
       }}>
 
         {/* Section heading */}
         <div style={{ marginBottom: "3.5rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
-            <Cross size={11} opacity={0.55} />
-            <span style={{ fontFamily: SERIF, fontSize: "0.58rem", letterSpacing: "0.48em", textTransform: "uppercase", color: "rgba(0,0,0,0.5)" }}>
-              What she does
+            <Cross size={11} opacity={0.85} />
+            <span style={{ fontFamily: SERIF, fontSize: "0.58rem", letterSpacing: "0.48em", textTransform: "uppercase", color: DIM }}>
+              What it does
             </span>
-            <Cross size={11} opacity={0.55} />
+            <Cross size={11} opacity={0.85} />
           </div>
           <h2 style={{
             fontFamily: SERIF,
@@ -273,7 +304,7 @@ export default function LandingPage() {
             fontSize: "clamp(1.8rem, 3.5vw, 3rem)",
             letterSpacing: "0.12em",
             textTransform: "uppercase",
-            color: "#0d0d0d",
+            color: INK,
             margin: 0,
           }}>
             Features
@@ -285,7 +316,7 @@ export default function LandingPage() {
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
           gap: "0",
-          border: "1px solid rgba(0,0,0,0.14)",
+          border: `1px solid ${RULE}`,
           flex: 1,
         }}>
           {FEATURES.map((f, i) => (
@@ -293,14 +324,16 @@ export default function LandingPage() {
               key={f.title}
               style={{
                 padding: "2rem 1.75rem",
-                borderRight: (i % 3 !== 2) ? "1px solid rgba(0,0,0,0.12)" : "none",
-                borderBottom: (i < 3) ? "1px solid rgba(0,0,0,0.12)" : "none",
+                borderRight: (i % 3 !== 2) ? `1px solid ${RULE}` : "none",
+                borderBottom: (i < 3) ? `1px solid ${RULE}` : "none",
+                background: GHOST,
                 position: "relative",
+                transition: "background 0.2s",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", marginBottom: "1.1rem" }}>
-                <Cross size={10} opacity={0.6} />
-                <span style={{ fontFamily: SERIF, fontSize: "0.55rem", letterSpacing: "0.35em", textTransform: "uppercase", color: "rgba(0,0,0,0.4)" }}>
+                <Cross size={10} opacity={0.75} />
+                <span style={{ fontFamily: SERIF, fontSize: "0.55rem", letterSpacing: "0.35em", textTransform: "uppercase", color: `rgba(196,30,58,0.7)` }}>
                   0{i + 1}
                 </span>
               </div>
@@ -310,7 +343,7 @@ export default function LandingPage() {
                 fontSize: "0.95rem",
                 letterSpacing: "0.1em",
                 textTransform: "uppercase",
-                color: "#0d0d0d",
+                color: INK,
                 margin: "0 0 0.7rem",
               }}>
                 {f.title}
@@ -320,7 +353,7 @@ export default function LandingPage() {
                 fontStyle: "italic",
                 fontSize: "0.97rem",
                 lineHeight: 1.75,
-                color: "rgba(0,0,0,0.58)",
+                color: DIM,
                 margin: 0,
               }}>
                 {f.desc}
@@ -342,7 +375,7 @@ export default function LandingPage() {
             fontFamily: "'Cormorant Garamond', serif",
             fontStyle: "italic",
             fontSize: "0.9rem",
-            color: "rgba(0,0,0,0.38)",
+            color: `rgba(196,30,58,0.55)`,
             letterSpacing: "0.04em",
           }}>
             ✝ &nbsp; free &nbsp;·&nbsp; no account needed &nbsp; ✝
@@ -357,16 +390,16 @@ export default function LandingPage() {
               fontSize: "0.68rem",
               letterSpacing: "0.2em",
               textTransform: "uppercase",
-              color: btn2Hover ? "#fff" : "#0d0d0d",
-              background: btn2Hover ? "#0d0d0d" : "transparent",
-              border: "1.5px solid #0d0d0d",
+              color: INK,
+              background: btn2Hover ? CRIMSON : "transparent",
+              border: `1.5px solid ${btn2Hover ? CRIMSON : RULE}`,
               padding: "12px 32px",
               textDecoration: "none",
               display: "inline-block",
-              transition: "background 0.22s, color 0.22s",
+              transition: "background 0.22s, border-color 0.22s",
             }}
           >
-            Add Alessa to your server →
+            Add Alfie to your server →
           </a>
         </div>
       </section>
