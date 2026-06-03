@@ -1086,6 +1086,15 @@ export async function searchTracks(query: string, limit = 5): Promise<SearchResu
 // LavaSrc, which can return covers / wrong artists unpredictably, so it goes last.
 const SEARCH_PREFIXES = ["ytsearch", "scsearch", "ytmsearch"];
 
+// Tracks whose titles match this are clearly not the original version the user
+// wants (unless they explicitly typed one of these words in the query).
+// We subtract JUNK_PENALTY from their score so bestMatchingTrack naturally
+// prefers the real track — without hard-blocking (the user CAN request karaoke
+// by typing "/play PYT karaoke").
+const JUNK_VERSION_RE =
+  /\b(karaoke|instrumental(?:\s+version)?|nightcore|slowed(?:\s*\+?\s*reverb)?|lo-?fi|lofi|8d(?:\s+audio)?|demo(?:\s+version)?|tribute|minus\s+one|no\s+vocals?|off\s+vocal|in\s+the\s+style\s+of|made\s+popular\s+by|originally\s+performed\s+by|sped[- ]up|speed[- ]up|cover\s+version|background\s+(?:music|version))\b/i;
+const JUNK_PENALTY = 10;
+
 // LavaSrc on public nodes routes ytmsearch: through Deezer/radio endpoints.
 // Deezer tracks fail with "stream metadata missing"; stream tracks are live-only.
 // Both should be excluded from search results entirely.
@@ -1113,20 +1122,26 @@ function resolveWithTimeout(node: any, url: string): Promise<any> {
 }
 
 // Score how closely a Lavalink track result matches the user's query.
-// Normalises both sides to lowercase word tokens, counts overlapping words.
-// Returns a count (higher = better match). Used to pick the best result
-// across multiple search sources so obscure/deep-cut tracks aren't drowned
-// out by a YouTube Music "close enough" hit.
+// Normalises both sides to lowercase word tokens, counts overlapping words,
+// then subtracts JUNK_PENALTY if the result title looks like a demo/karaoke/
+// nightcore/etc. version that the user almost certainly didn't want.
+// The penalty is skipped when the user explicitly typed a junk keyword (e.g.
+// "/play PYT karaoke" → karaoke version is correct, don't penalise it).
 function trackRelevanceScore(query: string, raw: any): number {
   const normalize = (s: string) =>
     s.toLowerCase().replace(/[^a-z0-9]/g, " ").split(/\s+/).filter(w => w.length > 1);
   const queryWords = normalize(query);
   if (!queryWords.length) return 0;
+  const title: string = raw?.info?.title ?? "";
   const resultWords = new Set([
-    ...normalize(raw?.info?.title ?? ""),
+    ...normalize(title),
     ...normalize(raw?.info?.author ?? ""),
   ]);
-  return queryWords.filter(w => resultWords.has(w)).length;
+  const wordMatch = queryWords.filter(w => resultWords.has(w)).length;
+  // Apply penalty only when the title is a junk version AND the user didn't
+  // ask for it (so "/play PYT instrumental" still works correctly).
+  const isJunk = JUNK_VERSION_RE.test(title) && !JUNK_VERSION_RE.test(query);
+  return isJunk ? wordMatch - JUNK_PENALTY : wordMatch;
 }
 
 // Pick the candidate with the highest relevance score (ties broken by order).
@@ -1169,10 +1184,16 @@ async function resolveSearch(node: any, query: string): Promise<any | null> {
           if (result?.loadType === "search") {
             const tracks = (result.data as any[]).filter((t: any) => !isBadTrack(t));
             if (tracks.length) {
-              candidates.push(tracks[0]);
-              // Fast-path: only early-exit when ALL query words matched — prevents
-              // partial-match wrong tracks from short-circuiting the search.
-              if (trackRelevanceScore(query, tracks[0]) >= queryWordCount) {
+              // Consider the top 5 results from each source so a demo/karaoke
+              // version ranked #1 by YouTube doesn't block the real track.
+              const topN = tracks.slice(0, 5);
+              const best = bestMatchingTrack(query, topN);
+              candidates.push(best);
+              const topScore = trackRelevanceScore(query, best);
+              // Early-exit only when ALL query words matched AND the winning
+              // candidate is not a junk version (positive score means no penalty
+              // was applied, i.e. the title isn't a demo/karaoke/nightcore/etc.).
+              if (topScore >= queryWordCount && topScore > 0) {
                 finish(bestMatchingTrack(query, candidates));
                 return;
               }
