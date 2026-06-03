@@ -1,1 +1,2 @@
 - [Alfie cleanup](alfie-cleanup.md) — Fred→Alfie migration: what was removed, what was kept, and key wiring decisions.
+- [Search & resolve fixes](search-resolve-fixes.md) — root causes of wrong search results and music drops; all resolve calls now go through resolveWithTimeout.

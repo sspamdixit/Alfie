@@ -495,10 +495,10 @@ async function handleNodeClose(nodeName: string): Promise<void> {
   log(`[Music] Node "${nodeName}" closed — recovering ${affected.size} guild(s).`, "discord");
 
   // Wait for the closed node to finish its reconnect cycle before we try
-  // to join voice (typically jirayu reconnects in ~1s; 2.5s gives headroom
-  // for other nodes to stabilise too). recentlyClosedNodes cooldown means
-  // the resolver will prefer any *other* available node.
-  await new Promise<void>((r) => setTimeout(r, 2500));
+  // to join voice. 4 s gives more headroom for other nodes to stabilise
+  // and for Shoukaku's internal reconnect bookkeeping to settle.
+  // recentlyClosedNodes cooldown ensures the resolver picks a *different* node.
+  await new Promise<void>((r) => setTimeout(r, 4000));
 
   for (const [guildId, snapshot] of affected) {
     // If something else already recovered this guild, skip.
@@ -711,7 +711,7 @@ async function fetchAutoplayTracks(
   if (videoId) {
     try {
       const mixUrl = `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`;
-      const result = await node.rest.resolve(mixUrl);
+      const result = await resolveWithTimeout(node, mixUrl);
       if (result?.loadType === "playlist") {
         const tracks = ((result.data as any).tracks ?? []) as any[];
         // Skip the first one — it's the seed track itself
@@ -723,7 +723,7 @@ async function fetchAutoplayTracks(
   // Strategy 2: artist search as a backup or top-up
   if (candidates.length < count && seed.author) {
     try {
-      const result = await node.rest.resolve(`ytsearch:${seed.author} mix`);
+      const result = await resolveWithTimeout(node, `ytsearch:${seed.author} mix`);
       if (result?.loadType === "search") {
         for (const t of (result.data as any[])) collect(t);
       }
@@ -901,11 +901,13 @@ async function attemptRecovery(
     textNotifyCallback?.(guildId, q.textChannelId, `playback hiccup on **${track.title}** — trying to recover…`);
   }
 
-  // On exception (not stuck), the encoded token may be stale or node-specific —
+  // On exception or stuck, the encoded token may be stale or node-specific —
   // especially when the Lavalink node has just cycled (1006 close/reconnect).
+  // Stuck events can also mean the audio stream died mid-track, so a fresh
+  // encoded token often unblocks playback without changing position.
   // Re-resolve the track to get a fresh encoded value before replaying.
   let encodedToPlay = track.encoded;
-  if (cause === "exception" && track.uri) {
+  if ((cause === "exception" || cause === "stuck") && track.uri) {
     try {
       const fresh = await resolveTrack(track.uri, track.requestedBy);
       if (fresh?.encoded) {
@@ -1071,7 +1073,7 @@ export async function searchTracks(query: string, limit = 5): Promise<SearchResu
 
   try {
     if (isUrl) {
-      const result = await node.rest.resolve(query);
+      const result = await resolveWithTimeout(node, query).catch(() => null);
       if (!result) return [];
       if (result.loadType === "search") return (result.data as any[]).slice(0, limit).map(toResult);
       if (result.loadType === "track") return [toResult(result.data)];
@@ -1089,8 +1091,11 @@ export async function searchTracks(query: string, limit = 5): Promise<SearchResu
   return [];
 }
 
-// Try multiple search sources so YouTube rate-limits don't silently kill search
-const SEARCH_PREFIXES = ["ytmsearch", "ytsearch", "scsearch"];
+// Try multiple search sources so YouTube rate-limits don't silently kill search.
+// ytsearch (YouTube Search) is first — it reliably returns the canonical version
+// of a song. ytmsearch routes through YouTube Music on many public nodes via
+// LavaSrc, which can return covers / wrong artists unpredictably, so it goes last.
+const SEARCH_PREFIXES = ["ytsearch", "scsearch", "ytmsearch"];
 
 // LavaSrc on public nodes routes ytmsearch: through Deezer/radio endpoints.
 // Deezer tracks fail with "stream metadata missing"; stream tracks are live-only.
@@ -1104,6 +1109,18 @@ function isStreamTrack(raw: any): boolean {
 }
 function isBadTrack(raw: any): boolean {
   return isDeezerTrack(raw) || isStreamTrack(raw);
+}
+
+// Wrap node.rest.resolve with a hard timeout so a slow/dead public node never
+// blocks the event loop indefinitely. 8 s is generous but prevents infinite hangs.
+const RESOLVE_TIMEOUT_MS = 8_000;
+function resolveWithTimeout(node: any, url: string): Promise<any> {
+  return Promise.race([
+    node.rest.resolve(url) as Promise<any>,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("resolve timeout")), RESOLVE_TIMEOUT_MS),
+    ),
+  ]);
 }
 
 // Score how closely a Lavalink track result matches the user's query.
@@ -1135,12 +1152,17 @@ function bestMatchingTrack(query: string, candidates: any[]): any {
   return best;
 }
 
-// Query all search sources in parallel. Return as soon as the first result
-// scores ≥ 1 (at least one query word matched) — covers ~99% of searches
-// without waiting for slower sources like SoundCloud. Only when every early
-// result scores 0 (no word overlap, likely a wrong hit) do we wait for all
-// sources and pick the best-scoring one.
+// Query all search sources in parallel. Early-exit only when the first result
+// matches ALL query words (score ≥ queryWordCount), so a Billie Eilish track
+// doesn't short-circuit a search for "billie jean michael jackson". If no
+// source achieves a full-word match, we wait for all three and pick the
+// best-scoring candidate — still fast because all requests run concurrently.
+// Every resolve call goes through resolveWithTimeout so a dead node can't stall.
 async function resolveSearch(node: any, query: string): Promise<any | null> {
+  const normalize = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9]/g, " ").split(/\s+/).filter(w => w.length > 1);
+  const queryWordCount = Math.max(1, normalize(query).length);
+
   const candidates: any[] = [];
   let remaining = SEARCH_PREFIXES.length;
 
@@ -1151,7 +1173,7 @@ async function resolveSearch(node: any, query: string): Promise<any | null> {
     };
 
     for (const prefix of SEARCH_PREFIXES) {
-      node.rest.resolve(`${prefix}:${query}`)
+      resolveWithTimeout(node, `${prefix}:${query}`)
         .then((result: any) => {
           if (done) { remaining--; return; }
           remaining--;
@@ -1159,14 +1181,15 @@ async function resolveSearch(node: any, query: string): Promise<any | null> {
             const tracks = (result.data as any[]).filter((t: any) => !isBadTrack(t));
             if (tracks.length) {
               candidates.push(tracks[0]);
-              // Return immediately if this result has any word match — fast path
-              if (trackRelevanceScore(query, tracks[0]) >= 1) {
+              // Fast-path: only early-exit when ALL query words matched — prevents
+              // partial-match wrong tracks from short-circuiting the search.
+              if (trackRelevanceScore(query, tracks[0]) >= queryWordCount) {
                 finish(bestMatchingTrack(query, candidates));
                 return;
               }
             }
           }
-          // All sources responded but none had a good score — best effort
+          // All sources responded — pick best effort even if no perfect match
           if (remaining === 0) finish(candidates.length ? bestMatchingTrack(query, candidates) : null);
         })
         .catch(() => {
@@ -1181,7 +1204,7 @@ async function resolveSearch(node: any, query: string): Promise<any | null> {
 async function resolveSearchMultiple(node: any, query: string, limit: number): Promise<any[]> {
   for (const prefix of SEARCH_PREFIXES) {
     try {
-      const result = await node.rest.resolve(`${prefix}:${query}`);
+      const result = await resolveWithTimeout(node, `${prefix}:${query}`);
       if (result?.loadType === "search") {
         const tracks = (result.data as any[]).filter(t => !isBadTrack(t));
         if (tracks.length) return tracks.slice(0, limit);
@@ -1192,14 +1215,31 @@ async function resolveSearchMultiple(node: any, query: string, limit: number): P
 }
 
 // If the ideal node returns nothing, walk every connected node until we find results.
-// Local node is tried first (direct Map lookup), then the rest in insertion order.
+// The first two nodes are tried concurrently (Promise.any) for speed; the rest
+// are tried serially as a last resort. Local node is always first when present.
 async function resolveSearchAnyNode(query: string): Promise<any | null> {
   if (!shoukaku) return null;
   const nodeMap = shoukaku.nodes as Map<string, any>;
   const local = nodeMap.get(LOCAL_NODE_NAME);
   const rest = [...nodeMap.values()].filter(n => n !== local);
   const ordered = local ? [local, ...rest] : rest;
-  for (const node of ordered) {
+  if (!ordered.length) return null;
+
+  // Try first two nodes concurrently — whichever finds a result wins.
+  const concurrentSlice = ordered.slice(0, 2);
+  const serialSlice = ordered.slice(2);
+
+  try {
+    const concurrent = concurrentSlice.map(node =>
+      resolveSearch(node, query)
+        .then(r => { if (!r) throw new Error("no result"); return r; })
+        .catch(() => Promise.reject(new Error("no result"))),
+    );
+    const result = await Promise.any(concurrent);
+    if (result) return result;
+  } catch { /* both concurrent nodes had no result — fall through to serial */ }
+
+  for (const node of serialSlice) {
     try {
       const result = await resolveSearch(node, query);
       if (result) return result;
@@ -1271,7 +1311,7 @@ export async function resolveTrack(
   let raw: any = null;
 
   if (isUrl) {
-    const result = await node.rest.resolve(query);
+    const result = await resolveWithTimeout(node, query).catch(() => null);
     if (result?.loadType === "search") {
       const tracks = (result.data as any[]).filter(t => !isDeezerTrack(t));
       if (tracks.length) raw = tracks[0];
@@ -1288,12 +1328,11 @@ export async function resolveTrack(
     }
 
     // YouTube URL fallback: public nodes often block direct URL resolution.
-    // Try SoundCloud search with the URL itself — some nodes resolve it.
-    // Then try every node with the full URL.
+    // Try ytsearch first (most reliable), then scsearch, then ytmsearch.
     if (!raw && /youtu\.?be/i.test(query)) {
-      for (const prefix of ["scsearch", "ytsearch", "ytmsearch"]) {
+      for (const prefix of ["ytsearch", "scsearch", "ytmsearch"]) {
         try {
-          const r = await node.rest.resolve(`${prefix}:${query}`);
+          const r = await resolveWithTimeout(node, `${prefix}:${query}`);
           if (r?.loadType === "search") {
             const tracks = (r.data as any[]).filter(t => !isDeezerTrack(t));
             if (tracks.length) { raw = tracks[0]; break; }
@@ -1315,7 +1354,7 @@ export async function resolveTrack(
       const fallbackNodes = local && local !== node ? [local, ...others] : others;
       for (const n of fallbackNodes) {
         try {
-          const r = await n.rest.resolve(query);
+          const r = await resolveWithTimeout(n, query);
           if (r?.loadType === "track") { raw = r.data; break; }
           if (r?.loadType === "search") {
             const tracks = (r.data as any[]).filter(t => !isDeezerTrack(t));
@@ -1350,7 +1389,7 @@ export async function resolvePlaylist(
   const isUrl = /^https?:\/\//i.test(query);
 
   if (isUrl) {
-    const result = await node.rest.resolve(query);
+    const result = await resolveWithTimeout(node, query).catch(() => null);
 
     if (result?.loadType === "playlist") {
       const data = result.data as any;
@@ -1481,6 +1520,7 @@ export async function joinAndPlay(
   }
 
   queue.current = track;
+  await resetPlayerFilters(queue.player, guildId);
   await queue.player.playTrack({ track: { encoded: track.encoded } });
   await queue.player.setGlobalVolume(queue.volume);
   nowPlayingCallback?.(guildId, track, queue);
@@ -1801,7 +1841,7 @@ export async function resolveSearchResults(
   if (!node) return [];
   const identifier = /^https?:\/\//i.test(query) ? query : `ytsearch:${query}`;
   try {
-    const result = await node.rest.resolve(identifier);
+    const result = await resolveWithTimeout(node, identifier);
     if (!result) return [];
     let raws: any[] = [];
     if (result.loadType === "search") raws = result.data as any[];
