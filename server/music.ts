@@ -10,26 +10,50 @@ interface LavalinkNodeConfig {
   secure: boolean;
 }
 
-// Penalty at which the local node is considered overloaded and traffic falls
-// back to public nodes. Shoukaku penalty scores: lower = healthier.
-// Typical idle penalty ~0-10; moderate load ~30-60; degraded > 75.
+// Name used when registering a user-configured local node (via LAVALINK_URL env var).
+// The qualityNodeResolver treats local and public nodes equally — this name is only
+// used to identify the local node in logs and for building the node list.
 const LOCAL_NODE_NAME = "local";
-const LOCAL_NODE_OVERLOAD_PENALTY = 80;
 
+// All nodes verified on Darren's weekly-checked public list (lavalink.darrennathanael.com)
+// or via the AjieDev/Free-Lavalink project (nodes.lavalink.rf.gd).
+// The quality-based resolver picks the best node at runtime — order here is only
+// used as initial connection order and has no effect on routing priority.
 const PUBLIC_LAVALINK_NODES: LavalinkNodeConfig[] = [
-  // Serenetia / AjieDev v4 — Indonesia, high uptime
-  { name: "serenetia-v4", url: "lavalinkv4.serenetia.com:443", auth: "https://dsc.gg/ajidevserver", secure: true },
+  // ── Asia-Pacific ─────────────────────────────────────────────────────────
+  // AjieDev / Serenetia — Indonesia, dedicated v4 server, highest verified uptime
+  { name: "serenetia-v4", url: "lavalinkv4.serenetia.com:443", auth: "https://seretia.link/discord", secure: true },
 
-  // Darrennathanael — Indonesia
+  // Darren Nathanael — Indonesia, weekly quality-checked
   { name: "darren", url: "lavalink.darrennathanael.com:443", auth: "Yonkotsu!Pinggir!Pantai", secure: true },
 
-  // DevamOP — India (different region for diversity)
+  // AneFaiz / MilloHost — Indonesia, v4 dedicated
+  { name: "millohost", url: "lava-v4.millohost.my.id:443", auth: "https://discord.gg/mjS5J2K3ep", secure: true },
+
+  // NyxBot — Singapore nodes (two for regional redundancy)
+  { name: "nyxbot-sg1", url: "sg1-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
+  { name: "nyxbot-sg2", url: "sg2-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
+
+  // NexCloud / Kartik — India, v4.2.1, youtube-plugin + lavasrc (Spotify/Apple Music/Deezer)
+  { name: "nexcloud-in", url: "n3.nexcloud.in:2026", auth: "nexcloud", secure: false },
+
+  // DevamOP — India fallback
   { name: "devamop", url: "lavalink.devamop.in:80", auth: "DevamOP", secure: false },
 
-  // NyxBot Singapore
-  { name: "nyxbot-sg1", url: "sg1-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
+  // ── Europe ───────────────────────────────────────────────────────────────
+  // G3V — UK, v4.2.1, opusEncodingQuality=10 + resamplingQuality=HIGH (best audio quality)
+  { name: "g3v-uk", url: "lava.g3v.co.uk:9008", auth: "lavalinklol", secure: false },
 
-  // Jirayu — Thailand (kept last; known to cycle with 1006 closes)
+  // ── Americas ─────────────────────────────────────────────────────────────
+  // VexaNode — Miami US, v4
+  { name: "vexanode-us", url: "omega.vexanode.cloud:2031", auth: "https://discord.vexanode.cloud", secure: false },
+
+  // ── Additional ───────────────────────────────────────────────────────────
+  // TriniumHost — SSL and non-SSL variants
+  { name: "tririum-ssl", url: "lavalink-v4.triniumhost.com:443", auth: "free", secure: true },
+  { name: "tririum-nossl", url: "lavalink.triniumhost.com:4333", auth: "free", secure: false },
+
+  // Jirayu — Thailand (kept last; known to cycle with 1006 closes occasionally)
   { name: "jirayu", url: "lavalink.jirayu.net:443", auth: "youshallnotpass", secure: true },
 ];
 
@@ -39,36 +63,41 @@ const PUBLIC_LAVALINK_NODES: LavalinkNodeConfig[] = [
 const recentlyClosedNodes = new Map<string, number>(); // nodeName → timestamp
 const NODE_CLOSE_COOLDOWN_MS = 20_000; // ignore a node for 20s after abnormal close
 
-// Custom node resolver: always use the local node when it is connected.
-// The Map is keyed by node name so nodes.get() is a direct O(1) lookup.
-// We intentionally skip penalty-based bypassing for local — the standard
-// Lavalink CPU penalty formula (1.05^(100*cpu)*10-10) exceeds the old
-// threshold of 80 at just ~50% system CPU, causing healthy local nodes to
-// be skipped under normal load. Public nodes are only used when local is
-// genuinely absent from the connected pool (e.g. disconnected or not configured).
-function localFirstNodeResolver(nodes: Map<string, any>, _connection?: any): any | undefined {
+// Pure quality-based node resolver. Every node — including any configured local
+// node — competes equally on Shoukaku's penalty score (which reflects CPU load,
+// memory pressure, and active player count). Nodes that closed abnormally within
+// the cooldown window receive a large penalty so they are selected last, giving
+// them time to stabilise before handling new connections.
+//
+// No node receives automatic priority: if a local node is under heavy load,
+// a lightly-loaded public node is correctly preferred over it.
+function qualityNodeResolver(nodes: Map<string, any>, _connection?: any): any | undefined {
   if (!nodes.size) return undefined;
-
-  // Direct Map lookup by name — the Map key is the node name in Shoukaku v4.
-  const local = nodes.get(LOCAL_NODE_NAME);
-  if (local) return local;
-
-  // Local not connected — fall back to least-loaded public node.
-  // Nodes that closed abnormally within the cooldown window are sorted last
-  // so we don't immediately re-select a flaky node that just reconnected.
   const now = Date.now();
   const nodeArray = [...nodes.values()];
-  const withStats = nodeArray.filter((n) => n.stats);
+  const withStats = nodeArray.filter(n => n.stats);
   const pool = withStats.length ? withStats : nodeArray;
+  return [...pool].sort((a, b) => {
+    const aCool = (recentlyClosedNodes.get(a.name) ?? 0) + NODE_CLOSE_COOLDOWN_MS > now ? 1_000 : 0;
+    const bCool = (recentlyClosedNodes.get(b.name) ?? 0) + NODE_CLOSE_COOLDOWN_MS > now ? 1_000 : 0;
+    return (Number(a.penalties ?? 0) + aCool) - (Number(b.penalties ?? 0) + bCool);
+  })[0];
+}
 
-  pool.sort((a, b) => {
-    const aCooling = (recentlyClosedNodes.get(a.name) ?? 0) + NODE_CLOSE_COOLDOWN_MS > now ? 1 : 0;
-    const bCooling = (recentlyClosedNodes.get(b.name) ?? 0) + NODE_CLOSE_COOLDOWN_MS > now ? 1 : 0;
-    if (aCooling !== bCooling) return aCooling - bCooling; // cooling nodes go last
-    return Number(a.penalties ?? 0) - Number(b.penalties ?? 0);
+// Returns all connected nodes sorted by the same quality metric used by the
+// resolver. Functions that walk multiple nodes (resolveSearchAnyNode, etc.)
+// use this so they probe the best node first, matching the resolver's choice.
+function getNodesByQuality(): any[] {
+  if (!shoukaku) return [];
+  const now = Date.now();
+  const all = [...(shoukaku.nodes as Map<string, any>).values()];
+  const withStats = all.filter(n => n.stats);
+  const pool = withStats.length ? withStats : all;
+  return [...pool].sort((a, b) => {
+    const aCool = (recentlyClosedNodes.get(a.name) ?? 0) + NODE_CLOSE_COOLDOWN_MS > now ? 1_000 : 0;
+    const bCool = (recentlyClosedNodes.get(b.name) ?? 0) + NODE_CLOSE_COOLDOWN_MS > now ? 1_000 : 0;
+    return (Number(a.penalties ?? 0) + aCool) - (Number(b.penalties ?? 0) + bCool);
   });
-
-  return pool[0];
 }
 
 function parseBoolean(value: string | undefined): boolean {
@@ -128,7 +157,8 @@ function getLavalinkNodes(): LavalinkNodeConfig[] {
 
   // ── Build final node list ─────────────────────────────────────────────────
   // Order: local first → any LAVALINK_NODES extras → public fallbacks.
-  // The localFirstNodeResolver will honour this preference at routing time.
+  // The qualityNodeResolver selects the best node at runtime regardless of
+  // this registration order, so local gets no automatic routing preference.
   if (localNode) {
     const publicPool = extraNodes.length ? extraNodes : PUBLIC_LAVALINK_NODES;
     log(`[Music] Local Lavalink node configured at ${localNode.url} — public pool has ${publicPool.length} nodes as fallback.`, "discord");
@@ -231,7 +261,7 @@ export function initMusic(client: Client): void {
     resumeByLibrary: false,
     reconnectTries: 5,
     reconnectInterval: 5,
-    nodeResolver: localFirstNodeResolver,
+    nodeResolver: qualityNodeResolver,
   });
 
   shoukaku.on("ready", (name) =>
@@ -1214,32 +1244,26 @@ async function resolveSearchMultiple(node: any, query: string, limit: number): P
   return [];
 }
 
-// If the ideal node returns nothing, walk every connected node until we find results.
-// The first two nodes are tried concurrently (Promise.any) for speed; the rest
-// are tried serially as a last resort. Local node is always first when present.
+// Walk every connected node until we find a search result, probing in quality
+// order so the best node is tried first (same ranking as the resolver).
+// The first two nodes are tried concurrently via Promise.any for speed;
+// remaining nodes are tried serially as a last resort.
 async function resolveSearchAnyNode(query: string): Promise<any | null> {
-  if (!shoukaku) return null;
-  const nodeMap = shoukaku.nodes as Map<string, any>;
-  const local = nodeMap.get(LOCAL_NODE_NAME);
-  const rest = [...nodeMap.values()].filter(n => n !== local);
-  const ordered = local ? [local, ...rest] : rest;
+  const ordered = getNodesByQuality();
   if (!ordered.length) return null;
 
-  // Try first two nodes concurrently — whichever finds a result wins.
-  const concurrentSlice = ordered.slice(0, 2);
-  const serialSlice = ordered.slice(2);
-
+  // Try the top two quality nodes concurrently — whichever wins first is used.
+  const concurrent = ordered.slice(0, 2).map(node =>
+    resolveSearch(node, query)
+      .then(r => { if (!r) throw new Error("no result"); return r; })
+      .catch(() => Promise.reject(new Error("no result"))),
+  );
   try {
-    const concurrent = concurrentSlice.map(node =>
-      resolveSearch(node, query)
-        .then(r => { if (!r) throw new Error("no result"); return r; })
-        .catch(() => Promise.reject(new Error("no result"))),
-    );
     const result = await Promise.any(concurrent);
     if (result) return result;
-  } catch { /* both concurrent nodes had no result — fall through to serial */ }
+  } catch { /* both returned nothing — fall through to serial */ }
 
-  for (const node of serialSlice) {
+  for (const node of ordered.slice(2)) {
     try {
       const result = await resolveSearch(node, query);
       if (result) return result;
@@ -1249,11 +1273,7 @@ async function resolveSearchAnyNode(query: string): Promise<any | null> {
 }
 
 async function resolveSearchMultipleAnyNode(query: string, limit: number): Promise<any[]> {
-  if (!shoukaku) return [];
-  const nodeMap = shoukaku.nodes as Map<string, any>;
-  const local = nodeMap.get(LOCAL_NODE_NAME);
-  const rest = [...nodeMap.values()].filter(n => n !== local);
-  const ordered = local ? [local, ...rest] : rest;
+  const ordered = getNodesByQuality();
   for (const node of ordered) {
     try {
       const result = await resolveSearchMultiple(node, query, limit);
@@ -1344,15 +1364,9 @@ export async function resolveTrack(
     }
 
     // Generic HTTP/HTTPS URL fallback (covers TTS proxy, direct audio files, etc.).
-    // If the ideal node couldn't resolve it, walk all other nodes. Public Lavalink
-    // nodes vary in what HTTP sources they accept; local is usually most permissive.
+    // Walk nodes in quality order (best first) since HTTP source support varies.
     if (!raw) {
-      const nodeMap = shoukaku!.nodes as Map<string, any>;
-      // Try local node first, then the rest
-      const local = nodeMap.get(LOCAL_NODE_NAME);
-      const others = [...nodeMap.values()].filter(n => n !== node && n !== local);
-      const fallbackNodes = local && local !== node ? [local, ...others] : others;
-      for (const n of fallbackNodes) {
+      for (const n of getNodesByQuality().filter(n => n !== node)) {
         try {
           const r = await resolveWithTimeout(n, query);
           if (r?.loadType === "track") { raw = r.data; break; }

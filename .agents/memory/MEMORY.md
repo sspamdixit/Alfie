@@ -1,2 +1,3 @@
 - [Alfie cleanup](alfie-cleanup.md) — Fred→Alfie migration: what was removed, what was kept, and key wiring decisions.
 - [Search & resolve fixes](search-resolve-fixes.md) — root causes of wrong search results and music drops; all resolve calls now go through resolveWithTimeout.
+- [Node pool & resolver](node-pool-resolver.md) — 12 verified public nodes, quality-based resolver replaces local-first; getNodesByQuality() used everywhere.
