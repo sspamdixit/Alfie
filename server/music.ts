@@ -15,47 +15,6 @@ interface LavalinkNodeConfig {
 // used to identify the local node in logs and for building the node list.
 const LOCAL_NODE_NAME = "local";
 
-// All nodes verified on Darren's weekly-checked public list (lavalink.darrennathanael.com)
-// or via the AjieDev/Free-Lavalink project (nodes.lavalink.rf.gd).
-// The quality-based resolver picks the best node at runtime — order here is only
-// used as initial connection order and has no effect on routing priority.
-const PUBLIC_LAVALINK_NODES: LavalinkNodeConfig[] = [
-  // ── Asia-Pacific ─────────────────────────────────────────────────────────
-  // AjieDev / Serenetia — Indonesia, dedicated v4 server, highest verified uptime
-  { name: "serenetia-v4", url: "lavalinkv4.serenetia.com:443", auth: "https://seretia.link/discord", secure: true },
-
-  // Darren Nathanael — Indonesia, weekly quality-checked
-  { name: "darren", url: "lavalink.darrennathanael.com:443", auth: "Yonkotsu!Pinggir!Pantai", secure: true },
-
-  // AneFaiz / MilloHost — Indonesia, v4 dedicated
-  { name: "millohost", url: "lava-v4.millohost.my.id:443", auth: "https://discord.gg/mjS5J2K3ep", secure: true },
-
-  // NyxBot — Singapore nodes (two for regional redundancy)
-  { name: "nyxbot-sg1", url: "sg1-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
-  { name: "nyxbot-sg2", url: "sg2-nodelink.nyxbot.app:3000", auth: "nyxbot.app/support", secure: false },
-
-  // NexCloud / Kartik — India, v4.2.1, youtube-plugin + lavasrc (Spotify/Apple Music/Deezer)
-  { name: "nexcloud-in", url: "n3.nexcloud.in:2026", auth: "nexcloud", secure: false },
-
-  // DevamOP — India fallback
-  { name: "devamop", url: "lavalink.devamop.in:80", auth: "DevamOP", secure: false },
-
-  // ── Europe ───────────────────────────────────────────────────────────────
-  // G3V — UK, v4.2.1, opusEncodingQuality=10 + resamplingQuality=HIGH (best audio quality)
-  { name: "g3v-uk", url: "lava.g3v.co.uk:9008", auth: "lavalinklol", secure: false },
-
-  // ── Americas ─────────────────────────────────────────────────────────────
-  // VexaNode — Miami US, v4
-  { name: "vexanode-us", url: "omega.vexanode.cloud:2031", auth: "https://discord.vexanode.cloud", secure: false },
-
-  // ── Additional ───────────────────────────────────────────────────────────
-  // TriniumHost — SSL and non-SSL variants
-  { name: "tririum-ssl", url: "lavalink-v4.triniumhost.com:443", auth: "free", secure: true },
-  { name: "tririum-nossl", url: "lavalink.triniumhost.com:4333", auth: "free", secure: false },
-
-  // Jirayu — Thailand (kept last; known to cycle with 1006 closes occasionally)
-  { name: "jirayu", url: "lavalink.jirayu.net:443", auth: "youshallnotpass", secure: true },
-];
 
 // Tracks when a node last closed abnormally. The resolver uses this to
 // deprioritize recently-closed nodes for a cooldown period so we don't
@@ -156,18 +115,18 @@ function getLavalinkNodes(): LavalinkNodeConfig[] {
   );
 
   // ── Build final node list ─────────────────────────────────────────────────
-  // Order: local first → any LAVALINK_NODES extras → public fallbacks.
+  // Order: local first → any LAVALINK_NODES extras.
   // The qualityNodeResolver selects the best node at runtime regardless of
-  // this registration order, so local gets no automatic routing preference.
+  // registration order, so local gets no automatic routing preference.
   if (localNode) {
-    const publicPool = extraNodes.length ? extraNodes : PUBLIC_LAVALINK_NODES;
-    log(`[Music] Local Lavalink node configured at ${localNode.url} — public pool has ${publicPool.length} nodes as fallback.`, "discord");
-    return [localNode, ...publicPool];
+    log(`[Music] Local Lavalink node configured at ${localNode.url}${extraNodes.length ? ` — ${extraNodes.length} extra node(s) from LAVALINK_NODES` : ""}.`, "discord");
+    return [localNode, ...extraNodes];
   }
 
   if (extraNodes.length) return extraNodes;
 
-  return PUBLIC_LAVALINK_NODES;
+  log("[Music] No Lavalink nodes configured. Set LAVALINK_URL + LAVALINK_PASSWORD (and optionally LAVALINK_NODES) to enable music.", "discord");
+  return [];
 }
 
 export interface QueueTrack {

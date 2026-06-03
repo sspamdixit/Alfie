@@ -18,7 +18,10 @@
 - `DISCORD_CLIENT_ID` — Discord application client ID (for OAuth login and invite URL)
 - `DISCORD_CLIENT_SECRET` — Discord application client secret (for OAuth login)
 - `DASHBOARD_PASSWORD` — Password for the admin dashboard at `/admin`
-- `LAVALINK_HOST`, `LAVALINK_PORT`, `LAVALINK_PASSWORD` — Lavalink audio server (for music playback)
+- `LAVALINK_URL` — Lavalink server address, e.g. `mynode.example.com:2333`
+- `LAVALINK_PASSWORD` (or `LAVALINK_AUTH`) — Lavalink server password
+- `LAVALINK_SECURE` — set to `true` if the node uses WSS/HTTPS
+- `LAVALINK_NODES` — optional JSON array of additional nodes (see Render notes below)
 
 # Architecture Notes
 
@@ -91,6 +94,11 @@ Set these additional environment variables in Render's dashboard for best perfor
 - `NODE_OPTIONS=--max-old-space-size=400` — caps Node.js heap at 400 MB, leaving ~100 MB for the OS and Shoukaku WS buffers on Render's 512 MB instance; prevents OOM kills
 - `PROGRESS_UPDATES=off` — optional; disables the 7-second progress-bar edits to cut Discord API calls if you want to conserve CPU
 - `RENDER_EXTERNAL_URL` — set to your Render service URL (e.g. `https://alfie.onrender.com`); required for the keep-alive self-ping to work
+- `LAVALINK_NODES` — JSON array of extra Lavalink nodes for redundancy. No node credentials are hardcoded in the source; everything is configured via env vars. Format:
+  ```json
+  [{"name":"node-2","url":"host:port","auth":"password","secure":false}]
+  ```
+  Public community node lists (regularly verified): https://lavalink.darrennathanael.com · https://nodes.lavalink.rf.gd
 
 ## What was optimised for Render
 
