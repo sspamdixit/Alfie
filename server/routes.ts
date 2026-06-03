@@ -2,7 +2,7 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import { type Server } from "http";
 import { createHash, timingSafeEqual } from "crypto";
 import rateLimit from "express-rate-limit";
-import { getAlfieBotStatus, getAlfieGuilds } from "../alfie/bot";
+import { getAlessaBotStatus, getAlessaGuilds } from "../alessa/bot";
 import { isLavalinkAvailable, getLavalinkNodeCount } from "./music";
 import { getDjStatus } from "./dj";
 import { z } from "zod";
@@ -160,7 +160,7 @@ export async function registerRoutes(
     const discordGuilds = await fetchDiscordGuilds(accessToken);
     const managed = discordGuilds.filter((g) => hasManageGuild(g.permissions));
 
-    const alfieGuildIds = new Set(getAlfieGuilds().map((g) => g.id));
+    const alessaGuildIds = new Set(getAlessaGuilds().map((g) => g.id));
 
     const guilds = managed.map((g) => ({
       id: g.id,
@@ -169,12 +169,12 @@ export async function registerRoutes(
       iconUrl: getGuildIconUrl(g),
       owner: g.owner,
       permissions: g.permissions,
-      hasAlfie: alfieGuildIds.has(g.id),
+      hasAlessa: alessaGuildIds.has(g.id),
     }));
 
     guilds.sort((a, b) => {
-      if (a.hasAlfie && !b.hasAlfie) return -1;
-      if (!a.hasAlfie && b.hasAlfie) return 1;
+      if (a.hasAlessa && !b.hasAlessa) return -1;
+      if (!a.hasAlessa && b.hasAlessa) return 1;
       return a.name.localeCompare(b.name);
     });
 
@@ -192,14 +192,14 @@ export async function registerRoutes(
     if (!guild || !hasManageGuild(guild.permissions)) {
       return res.status(403).json({ error: "Access denied." });
     }
-    const hasAlfie = getAlfieGuilds().some((g) => g.id === guildId);
+    const hasAlessa = getAlessaGuilds().some((g) => g.id === guildId);
     return res.json({
       id: guild.id,
       name: guild.name,
       icon: guild.icon,
       iconUrl: getGuildIconUrl(guild),
       owner: guild.owner,
-      hasAlfie,
+      hasAlessa,
     });
   });
 
@@ -236,10 +236,10 @@ export async function registerRoutes(
 
   app.use("/api", ensureApiAuthorized);
 
-  // ── Alfie bot status ──────────────────────────────────────────────────────
+  // ── Alessa bot status ──────────────────────────────────────────────────────
 
-  app.get("/api/alfie/status", (_req, res) => {
-    res.json(getAlfieBotStatus());
+  app.get("/api/alessa/status", (_req, res) => {
+    res.json(getAlessaBotStatus());
   });
 
   // ── DJ / Rave status ──────────────────────────────────────────────────────

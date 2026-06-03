@@ -165,8 +165,8 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 // ── Main dashboard ────────────────────────────────────────────────────────────
 
 function Dashboard() {
-  const { data: alfie, isLoading: alfieLoading } = useQuery<AlessaBotStatus>({
-    queryKey: ["/api/alfie/status"],
+  const { data: alessa, isLoading: alessaLoading } = useQuery<AlessaBotStatus>({
+    queryKey: ["/api/alessa/status"],
     refetchInterval: 5000,
   });
 
@@ -187,7 +187,7 @@ function Dashboard() {
     window.location.reload();
   };
 
-  const uptime = alfie?.uptimeStart ? Date.now() - alfie.uptimeStart : null;
+  const uptime = alessa?.uptimeStart ? Date.now() - alfie.uptimeStart : null;
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -215,39 +215,39 @@ function Dashboard() {
             <h2 className="text-sm font-semibold text-white/60 uppercase tracking-widest">Bot status</h2>
           </div>
 
-          {alfieLoading ? (
+          {alessaLoading ? (
             <p className="text-sm text-white/30">Loading…</p>
           ) : (
             <div className="space-y-4">
               <div className="flex items-center gap-3">
-                {alfie?.online ? (
+                {alessa?.online ? (
                   <Wifi className="w-4 h-4 text-green-400" />
                 ) : (
                   <WifiOff className="w-4 h-4 text-red-400" />
                 )}
                 <div>
                   <p className="text-base font-semibold text-white">
-                    {alfie?.tag ?? "Alessa"}
+                    {alessa?.tag ?? "Alessa"}
                   </p>
-                  <p className="text-xs text-white/30 capitalize">{alfie?.status ?? "offline"}</p>
+                  <p className="text-xs text-white/30 capitalize">{alessa?.status ?? "offline"}</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-2">
-                <Stat label="Servers" value={alfie?.guildCount?.toString() ?? "—"} />
+                <Stat label="Servers" value={alessa?.guildCount?.toString() ?? "—"} />
                 <Stat label="Uptime" value={uptime != null ? formatUptime(uptime) : "—"} />
                 <Stat label="Process uptime" value={service?.uptimeMs != null ? formatUptime(service.uptimeMs) : "—"} />
               </div>
 
-              {alfie?.lastError && (
+              {alessa?.lastError && (
                 <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">
-                  {alfie.lastError}
+                  {alessa.lastError}
                 </p>
               )}
 
-              {!alfie?.online && !alfie?.lastError && (
+              {!alessa?.online && !alessa?.lastError && (
                 <p className="text-xs text-white/30 bg-white/[0.03] rounded-lg px-3 py-2">
-                  Set <code className="text-white/50">ALFIE_TOKEN</code> in Secrets and ensure <code className="text-white/50">ENABLE_ALFIE=true</code> to bring Alessa online.
+                  Set <code className="text-white/50">ALESSA_TOKEN</code> in Secrets and ensure <code className="text-white/50">ENABLE_ALESSA=true</code> to bring Alessa online.
                 </p>
               )}
             </div>

@@ -22,7 +22,7 @@ const SERIF = "'Cinzel', serif";
 const FEATURES = [
   {
     title: "Stream Anything",
-    desc: "YouTube, SoundCloud, and Spotify links. Search by name. Alfie finds it and queues it immediately.",
+    desc: "YouTube, SoundCloud, and Spotify links. Search by name. Alessa finds it and queues it immediately.",
   },
   {
     title: "Full Queue Control",
@@ -38,7 +38,7 @@ const FEATURES = [
   },
   {
     title: "Autoplay",
-    desc: "When your queue runs dry, Alfie picks up similar music automatically. The party doesn't stop.",
+    desc: "When your queue runs dry, Alessa picks up similar music automatically. The party doesn't stop.",
   },
   {
     title: "Saved Playlists",
@@ -155,7 +155,7 @@ export default function LandingPage() {
             margin: "0 0 0.15em",
             lineHeight: 1,
           }}>
-            Alfie
+            Alessa
           </h1>
 
           {/* Label */}
@@ -399,7 +399,7 @@ export default function LandingPage() {
               transition: "background 0.22s, border-color 0.22s",
             }}
           >
-            Add Alfie to your server →
+            Add Alessa to your server →
           </a>
         </div>
       </section>

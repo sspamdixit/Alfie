@@ -1,6 +1,6 @@
 # Project Overview
 
-**Alfie** is a Discord music bot with a React web dashboard. Built with Node.js, TypeScript, Discord.js v14, Lavalink/Shoukaku, Express, Socket.IO, Drizzle ORM, and PostgreSQL.
+**Alessa** is a Discord music bot with a React web dashboard. Built with Node.js, TypeScript, Discord.js v14, Lavalink/Shoukaku, Express, Socket.IO, Drizzle ORM, and PostgreSQL.
 
 # Replit Configuration
 
@@ -13,8 +13,8 @@
 
 # Required Environment Variables / Secrets
 
-- `ALFIE_TOKEN` — Discord bot token for Alfie (required for bot to come online)
-- `ENABLE_ALFIE` — Set to `true` to auto-start Alfie on server boot (already set)
+- `ALESSA_TOKEN` — Discord bot token for Alessa (required for bot to come online); falls back to `ALFIE_TOKEN` for backward compatibility
+- `ENABLE_ALESSA` — Set to `true` to auto-start Alessa on server boot; also accepts `ENABLE_ALFIE=true` for backward compatibility
 - `DISCORD_CLIENT_ID` — Discord application client ID (for OAuth login and invite URL)
 - `DISCORD_CLIENT_SECRET` — Discord application client secret (for OAuth login)
 - `DASHBOARD_PASSWORD` — Password for the admin dashboard at `/admin`
@@ -27,17 +27,17 @@
 
 ## Core Structure
 - Server code: `server/`
-- Bot code: `alfie/bot.ts`
+- Bot code: `alessa/bot.ts`
 - Client code: `client/`
 - Shared schema/types: `shared/`
 - Static production assets: `dist/public` (after build)
 - API routes mounted under `/api`, protected by dashboard auth where appropriate
 - Secrets (Discord token, etc.) read from environment variables — never committed
 
-## Bot (`alfie/bot.ts`)
+## Bot (`alessa/bot.ts`)
 - Discord.js v14 client
-- Auto-starts when `ENABLE_ALFIE=true` and `ALFIE_TOKEN` is set
-- Falls back to `DISCORD_TOKEN` if `ALFIE_TOKEN` is not set
+- Auto-starts when `ENABLE_ALESSA=true` (or legacy `ENABLE_ALFIE=true`) and `ALESSA_TOKEN` is set
+- Falls back to `ALFIE_TOKEN` then `DISCORD_TOKEN` if `ALESSA_TOKEN` is not set
 - Commands: `/play`, `/skip`, `/queue`, `/nowplaying`, `/pause`, `/resume`, `/volume`, `/shuffle`, `/loop`, `/seek`, `/lyrics`, `/history`, `/autoplay`, `/savequeue`, `/playlist`, `/rave`, `/ravestop`, `/speak`, `/stop`, `/disconnect`
 - Vote-skip (majority required if 3+ in voice)
 - Auto-disconnect when alone in VC (2-minute grace period)
@@ -75,10 +75,10 @@
 - `GET /api/oauth/me` — Current logged-in user
 - `POST /api/oauth/logout` — Logout
 - `GET /api/public/guilds` — Managed guilds (requires Discord OAuth)
-- `GET /api/public/guilds/:guildId/info` — Guild info + Alfie presence
+- `GET /api/public/guilds/:guildId/info` — Guild info + Alessa presence
 - `GET /api/public/invite-url` — Bot invite URL
 - `POST /api/auth` — Admin dashboard login
-- `GET /api/alfie/status` — Alfie bot status (admin only)
+- `GET /api/alessa/status` — Alessa bot status (admin only)
 - `GET /api/dj/status` — DJ/rave sessions + Lavalink status (admin only)
 - `GET /api/service/health` — Server uptime (admin only)
 
@@ -93,7 +93,7 @@ Set these additional environment variables in Render's dashboard for best perfor
 
 - `NODE_OPTIONS=--max-old-space-size=400` — caps Node.js heap at 400 MB, leaving ~100 MB for the OS and Shoukaku WS buffers on Render's 512 MB instance; prevents OOM kills
 - `PROGRESS_UPDATES=off` — optional; disables the 7-second progress-bar edits to cut Discord API calls if you want to conserve CPU
-- `RENDER_EXTERNAL_URL` — set to your Render service URL (e.g. `https://alfie.onrender.com`); required for the keep-alive self-ping to work
+- `RENDER_EXTERNAL_URL` — set to your Render service URL (e.g. `https://alessa.onrender.com`); required for the keep-alive self-ping to work
 - `LAVALINK_NODES` — JSON array of extra Lavalink nodes for redundancy. No node credentials are hardcoded in the source; everything is configured via env vars. Format:
   ```json
   [{"name":"node-2","url":"host:port","auth":"password","secure":false}]

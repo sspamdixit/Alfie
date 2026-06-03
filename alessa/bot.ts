@@ -61,7 +61,7 @@ import {
 import { speakInVoice } from "../server/tts";
 import { storage } from "../server/storage";
 
-export interface AlfieBotStatus {
+export interface AlessaBotStatus {
   online: boolean;
   tag: string | null;
   avatarUrl: string | null;
@@ -71,7 +71,7 @@ export interface AlfieBotStatus {
   lastError: string | null;
 }
 
-let botState: AlfieBotStatus = {
+let botState: AlessaBotStatus = {
   online: false,
   tag: null,
   avatarUrl: null,
@@ -81,7 +81,7 @@ let botState: AlfieBotStatus = {
   lastError: null,
 };
 
-export function getAlfieBotStatus(): AlfieBotStatus {
+export function getAlessaBotStatus(): AlessaBotStatus {
   return { ...botState };
 }
 
@@ -383,7 +383,7 @@ function formatSkipReply(r: SkipResult): string {
 
 // ── Slash commands ─────────────────────────────────────────────────────────────
 const SLASH_COMMANDS = [
-  new SlashCommandBuilder().setName("ping").setDescription("check if alfie is alive"),
+  new SlashCommandBuilder().setName("ping").setDescription("check if alessa is alive"),
   new SlashCommandBuilder().setName("help").setDescription("list all music commands"),
   new SlashCommandBuilder().setName("status").setDescription("show bot status"),
   new SlashCommandBuilder()
@@ -454,10 +454,10 @@ const SLASH_COMMANDS = [
 ];
 
 // ── Bot startup ───────────────────────────────────────────────────────────────
-export async function startAlfie(): Promise<void> {
-  const rawToken = (process.env.ALFIE_TOKEN ?? process.env.DISCORD_TOKEN ?? "").trim();
+export async function startAlessa(): Promise<void> {
+  const rawToken = (process.env.ALESSA_TOKEN ?? process.env.ALFIE_TOKEN ?? process.env.DISCORD_TOKEN ?? "").trim();
   if (!rawToken) {
-    log("[Alfie] No ALFIE_TOKEN set — Alfie will not start.", "alfie");
+    log("[Alessa] No ALESSA_TOKEN set — Alessa will not start.", "alessa");
     return;
   }
 
@@ -504,7 +504,7 @@ export async function startAlfie(): Promise<void> {
   });
 
   client.once("ready", async (readyClient) => {
-    log(`[Alfie] Logged in as ${readyClient.user.tag}`, "alfie");
+    log(`[Alessa] Logged in as ${readyClient.user.tag}`, "alessa");
     botState = {
       online: true,
       tag: readyClient.user.tag,
@@ -559,7 +559,7 @@ export async function startAlfie(): Promise<void> {
           });
           scheduleNowPlayingProgressUpdates(sent, guildId, track);
         } catch (err: any) {
-          log(`[Alfie] Failed to post now-playing: ${err.message}`, "alfie");
+          log(`[Alessa] Failed to post now-playing: ${err.message}`, "alessa");
         }
       })();
     });
@@ -575,9 +575,9 @@ export async function startAlfie(): Promise<void> {
     for (const guild of readyClient.guilds.cache.values()) {
       try {
         await rest.put(Routes.applicationGuildCommands(readyClient.user.id, guild.id), { body: commandData });
-        log(`[Alfie] Slash commands registered in ${guild.name}`, "alfie");
+        log(`[Alessa] Slash commands registered in ${guild.name}`, "alessa");
       } catch (err: any) {
-        log(`[Alfie] Failed to register commands in ${guild.name}: ${err.message}`, "alfie");
+        log(`[Alessa] Failed to register commands in ${guild.name}: ${err.message}`, "alessa");
       }
     }
   });
@@ -863,7 +863,7 @@ export async function startAlfie(): Promise<void> {
           }
         }
       } catch (err: any) {
-        log(`[Alfie/slash:play] ${err.message}`, "alfie");
+        log(`[Alfie/slash:play] ${err.message}`, "alessa");
         await interaction.editReply({ content: `oopsie~ music went boom: ${err.message}`, allowedMentions: { parse: [] } });
       }
       return;
@@ -1298,7 +1298,7 @@ export async function startAlfie(): Promise<void> {
     botState.guildCount = client?.guilds.cache.size ?? botState.guildCount;
     const rest = new REST({ version: "10" }).setToken(rawToken);
     rest.put(Routes.applicationGuildCommands(client!.user!.id, guild.id), { body: SLASH_COMMANDS.map((c) => c.toJSON()) })
-      .catch((e: any) => log(`[Alfie] Failed to register commands in new guild ${guild.name}: ${e.message}`, "alfie"));
+      .catch((e: any) => log(`[Alessa] Failed to register commands in new guild ${guild.name}: ${e.message}`, "alessa"));
   });
 
   client.on("guildDelete", () => {
@@ -1322,35 +1322,35 @@ export async function startAlfie(): Promise<void> {
   });
 
   client.on("error", (err) => {
-    log(`[Alfie] Discord client error: ${err.message}`, "alfie");
+    log(`[Alessa] Discord client error: ${err.message}`, "alessa");
     botState.lastError = err.message;
   });
 
   try {
-    log("[Alfie] Attempting Discord login…", "alfie");
+    log("[Alessa] Attempting Discord login…", "alessa");
     await client.login(rawToken);
   } catch (err: any) {
     const msg: string = err.message ?? String(err);
     let friendlyError = msg;
-    if (/invalid token/i.test(msg)) friendlyError = "Invalid ALFIE_TOKEN — check the value in your secrets.";
+    if (/invalid token/i.test(msg)) friendlyError = "Invalid ALESSA_TOKEN — check the value in your secrets.";
     else if (/disallowed intents/i.test(msg)) friendlyError = "Intents blocked — enable Message Content Intent in Discord Developer Portal.";
 
-    log(`[Alfie] Login failed: ${friendlyError}`, "alfie");
+    log(`[Alessa] Login failed: ${friendlyError}`, "alessa");
     botState.lastError = friendlyError;
     botState.online = false;
     botState.status = "error";
 
-    loginRetryTimer = setTimeout(() => startAlfie(), 30_000);
+    loginRetryTimer = setTimeout(() => startAlessa(), 30_000);
     loginRetryTimer.unref?.();
   }
 }
 
-export function getAlfieGuilds(): Array<{ id: string; name: string }> {
+export function getAlessaGuilds(): Array<{ id: string; name: string }> {
   if (!client) return [];
   return [...client.guilds.cache.values()].map((g) => ({ id: g.id, name: g.name }));
 }
 
-export function stopAlfie(): void {
+export function stopAlessa(): void {
   if (loginRetryTimer) { clearTimeout(loginRetryTimer); loginRetryTimer = null; }
   for (const t of backgroundTimers) { clearInterval(t); clearTimeout(t); }
   backgroundTimers.clear();

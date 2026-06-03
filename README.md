@@ -1,4 +1,4 @@
-# Alfie
+# Alessa
 
 > A waifu music bot for Discord. No AI chat, no memory, no drama — just the queue and the vibes.
 > Mascot: Misa Amane.
@@ -72,7 +72,7 @@
 |---|---|
 | `/lyrics [song]` | Lyrics for the current track, or search by `artist - title` |
 | `/speak <text>` | Speak text in the voice channel (Brian TTS) |
-| `/ping` | Check if Alfie is alive |
+| `/ping` | Check if Alessa is alive |
 | `/status` | Bot status and uptime |
 | `/help` | List all commands |
 
@@ -100,7 +100,7 @@ Create a `.env` file or configure these in your host:
 
 ```env
 # Required
-ALFIE_TOKEN=your_discord_bot_token
+ALESSA_TOKEN=your_discord_bot_token
 
 # Lavalink — single node
 LAVALINK_URL=your-lavalink-host:2333
@@ -111,7 +111,7 @@ LAVALINK_SECURE=false
 # LAVALINK_NODES=[{"name":"main","url":"host:2333","auth":"pass","secure":false}]
 
 # Optional
-DATABASE_URL=postgresql://user:pass@host:5432/alfie
+DATABASE_URL=postgresql://user:pass@host:5432/alessa
 GEMINI_API_KEY=your_gemini_key        # enables AI track discovery in rave mode
 PROGRESS_UPDATES=on                   # set to "off" to disable live progress bar
 PROGRESS_UPDATE_MS=7000               # progress bar refresh rate in ms
@@ -120,16 +120,16 @@ PROGRESS_UPDATE_MS=7000               # progress bar refresh rate in ms
 ### 3. Create the Discord application
 
 1. Go to [discord.com/developers](https://discord.com/developers/applications) → **New Application**.
-2. Under **Bot**, create a bot and copy the token into `ALFIE_TOKEN`.
+2. Under **Bot**, create a bot and copy the token into `ALESSA_TOKEN`.
 3. Enable **Server Members Intent** and **Message Content Intent**.
 4. Under **OAuth2 → URL Generator**, select scopes `bot` + `applications.commands` and permissions:
    - `Send Messages`, `Embed Links`, `Add Reactions`
    - `Connect`, `Speak`
-5. Use the generated URL to invite Alfie to your server.
+5. Use the generated URL to invite Alessa to your server.
 
 ### 4. Run Lavalink
 
-Alfie uses [Lavalink](https://github.com/lavalink-devs/Lavalink) for all audio — it's a separate Java process that needs to be running before Alfie starts.
+Alessa uses [Lavalink](https://github.com/lavalink-devs/Lavalink) for all audio — it's a separate Java process that needs to be running before Alessa starts.
 
 ```bash
 # Requires Java 17+
@@ -184,7 +184,7 @@ Without a database, all music commands work normally — only `/savequeue` and `
 
 | Variable | Required | Description |
 |---|---|---|
-| `ALFIE_TOKEN` | **Yes** | Discord bot token |
+| `ALESSA_TOKEN` | **Yes** | Discord bot token |
 | `LAVALINK_URL` | **Yes*** | Lavalink node host:port |
 | `LAVALINK_AUTH` | **Yes*** | Lavalink node password |
 | `LAVALINK_SECURE` | No | `true` for WSS (default: `false`) |
@@ -201,15 +201,15 @@ Without a database, all music commands work normally — only `/savequeue` and `
 
 ## Hosting recommendations
 
-Alfie and Lavalink need to run as separate processes. They can share a host or be split across two.
+Alessa and Lavalink need to run as separate processes. They can share a host or be split across two.
 
 | Platform | Notes |
 |---|---|
 | [Railway](https://railway.app) | Deploy from GitHub; add a Lavalink service in the same project |
 | [Render](https://render.com) | Free tier works; add a PostgreSQL instance for playlists |
-| VPS (any) | Run Alfie with `pm2` or `systemd`; run Lavalink in a `screen`/`tmux` or as a service |
+| VPS (any) | Run Alessa with `pm2` or `systemd`; run Lavalink in a `screen`/`tmux` or as a service |
 
-Lavalink requires **Java 17+**. The Alfie Node.js process is lightweight and runs fine on free-tier plans.
+Lavalink requires **Java 17+**. The Alessa Node.js process is lightweight and runs fine on free-tier plans.
 
 ---
 
@@ -225,4 +225,4 @@ Lavalink requires **Java 17+**. The Alfie Node.js process is lightweight and run
 
 ---
 
-*Alfie is a standalone bot. It does not depend on any other service or codebase at runtime.*
+*Alessa is a standalone bot. It does not depend on any other service or codebase at runtime.*

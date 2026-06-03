@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { DASHBOARD_AUTH_TOKEN_STORAGE_KEY } from "@/lib/queryClient";
 
-const AUTH_FLAG_KEY = "alfie-authed";
+const AUTH_FLAG_KEY = "alessa-authed";
 const REFETCH_MS = 5_000;
 
 function isAuthed(): boolean {

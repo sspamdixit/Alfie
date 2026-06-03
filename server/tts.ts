@@ -33,7 +33,7 @@ export async function resolveTTSTrack(text: string, requestedBy = "tts"): Promis
   try {
     const track = await Promise.any([attempt(googleUrl), attempt(seUrl)]);
     track.title = `[TTS] ${text.slice(0, 80)}`;
-    track.author = "Alfie TTS";
+    track.author = "Alessa TTS";
     return track;
   } catch {
     log(`[TTS] Both Google and StreamElements failed for guild TTS.`, "discord");

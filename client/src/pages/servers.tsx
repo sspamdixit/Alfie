@@ -16,7 +16,7 @@ interface ManagedGuild {
   iconUrl: string | null;
   owner: boolean;
   permissions: string;
-  hasAlfie: boolean;
+  hasAlessa: boolean;
 }
 
 export default function ServersPage() {
@@ -53,8 +53,8 @@ export default function ServersPage() {
     window.open(`${inviteUrl}&guild_id=${guildId}&disable_guild_select=true`, "_blank");
   };
 
-  const activeGuilds = guilds.filter((g) => g.hasAlfie);
-  const otherGuilds = guilds.filter((g) => !g.hasAlfie);
+  const activeGuilds = guilds.filter((g) => g.hasAlessa);
+  const otherGuilds = guilds.filter((g) => !g.hasAlessa);
 
   if (loading) {
     return (

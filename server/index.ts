@@ -2,7 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { startAlfie, getAlfieBotStatus } from "../alfie/bot";
+import { startAlessa, getAlessaBotStatus } from "../alessa/bot";
 import { initSocket } from "./socket";
 import session from "express-session";
 import createMemoryStore from "memorystore";
@@ -40,7 +40,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const sessionSecret = process.env.SESSION_SECRET ?? "alfie-dev-secret-change-in-prod";
+const sessionSecret = process.env.SESSION_SECRET ?? "alessa-dev-secret-change-in-prod";
 app.use(
   session({
     secret: sessionSecret,
@@ -53,7 +53,7 @@ app.use(
       maxAge: 7 * 24 * 60 * 60 * 1000,
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     },
-    name: "alfie.sid",
+    name: "alessa.sid",
   }),
 );
 
@@ -77,7 +77,7 @@ app.use(
 app.use(express.urlencoded({ extended: false, limit: "16kb" }));
 
 app.get("/health", (_req, res) => {
-  const bot = getAlfieBotStatus();
+  const bot = getAlessaBotStatus();
   res.status(200).json({
     status: "ok",
     bot: {
@@ -181,10 +181,10 @@ function startKeepAlive() {
     },
     () => {
       log(`serving on port ${port}`);
-      if (process.env.ENABLE_ALFIE === "true") {
-        startAlfie();
+      if (process.env.ENABLE_ALESSA === "true" || process.env.ENABLE_ALFIE === "true") {
+        startAlessa();
       } else {
-        log("Alfie auto-start disabled. Set ENABLE_ALFIE=true to start.", "alfie");
+        log("Alessa auto-start disabled. Set ENABLE_ALESSA=true to start.", "alessa");
       }
       if (process.env.NODE_ENV === "production") {
         startKeepAlive();

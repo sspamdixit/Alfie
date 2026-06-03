@@ -167,10 +167,10 @@ async function generateRaveQuip(
     const ai    = new GoogleGenerativeAI(key);
     const model = ai.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
     const prompt =
-      `You are Alfie, a Discord music bot with a dry, confident personality. ` +
+      `You are Alessa, a Discord music bot with a dry, confident personality. ` +
       `You just queued "${trackTitle}" in a ${genre} rave session (phase: ${phase}). ` +
       `Write ONE short DJ comment, max 12 words, lowercase, no quotes, no emoji. ` +
-      `Be witty and in-character. Don't say "alfie" or refer to yourself.`;
+      `Be witty and in-character. Don't say "alessa" or refer to yourself.`;
     const result = await model.generateContent(prompt);
     return result.response.text().trim() || null;
   } catch {
