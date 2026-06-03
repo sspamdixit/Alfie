@@ -393,7 +393,11 @@ async function recoverQueueOnNewNode(
   let freshResume = snapshot.toResume ? { ...snapshot.toResume } : null;
   if (freshResume?.uri) {
     try {
-      const fresh = await resolveTrack(freshResume.uri, freshResume.requestedBy);
+      // Pass title+author as text fallback so if the platform URI fails on the
+      // new node (e.g. SoundCloud URI on a node without the SoundCloud plugin),
+      // we search by the exact known metadata rather than returning null.
+      const textFallback = [freshResume.author, freshResume.title].filter(Boolean).join(" ");
+      const fresh = await resolveTrack(freshResume.uri, freshResume.requestedBy, textFallback || undefined);
       if (fresh?.encoded) {
         freshResume.encoded = fresh.encoded;
         log(`[Music] Re-resolved fresh encoded for "${freshResume.title}" (guild ${guildId}).`, "discord");
@@ -898,7 +902,11 @@ async function attemptRecovery(
   let encodedToPlay = track.encoded;
   if ((cause === "exception" || cause === "stuck") && track.uri) {
     try {
-      const fresh = await resolveTrack(track.uri, track.requestedBy);
+      // Pass title+author as text fallback: if the platform URI can't be resolved
+      // on this node (e.g. SoundCloud URI, no plugin), the precise metadata search
+      // finds the correct track rather than returning null or a wrong version.
+      const textFallback = [track.author, track.title].filter(Boolean).join(" ");
+      const fresh = await resolveTrack(track.uri, track.requestedBy, textFallback || undefined);
       if (fresh?.encoded) {
         encodedToPlay = fresh.encoded;
         // Keep the queue entry up to date so subsequent recoveries also get the fresh token.
@@ -1156,14 +1164,37 @@ function trackRelevanceScore(query: string, raw: any): number {
   return isJunk ? wordMatch - JUNK_PENALTY : wordMatch;
 }
 
-// Pick the candidate with the highest relevance score (ties broken by order).
+// Platform resolution reliability ranking.
+// YouTube URLs resolve on every Lavalink node regardless of plugins; SoundCloud
+// and YouTube Music require optional source plugins that not all nodes carry.
+// When relevance scores are equal we bias toward the most-portable platform so
+// that the stored URI can always be re-resolved on a fresh node during recovery
+// without falling back to a generic text search that might return the wrong track.
+function platformPriority(raw: any): number {
+  const uri: string = raw?.info?.uri ?? "";
+  if (/youtube\.com|youtu\.be/i.test(uri)) return 2;
+  if (/soundcloud\.com/i.test(uri)) return 1;
+  // YouTube Music, Deezer, etc. — least portable
+  return 0;
+}
+
+// Pick the candidate with the highest relevance score.
+// Ties are broken by platform priority (YouTube > SoundCloud > others) so we
+// consistently favour URIs that every node can re-resolve, preventing
+// cross-platform mismatches when the search node differs from the playback node.
 function bestMatchingTrack(query: string, candidates: any[]): any {
   if (candidates.length === 1) return candidates[0];
   let best = candidates[0];
   let bestScore = trackRelevanceScore(query, best);
+  let bestPriority = platformPriority(best);
   for (let i = 1; i < candidates.length; i++) {
     const score = trackRelevanceScore(query, candidates[i]);
-    if (score > bestScore) { bestScore = score; best = candidates[i]; }
+    const priority = platformPriority(candidates[i]);
+    if (score > bestScore || (score === bestScore && priority > bestPriority)) {
+      bestScore = score;
+      bestPriority = priority;
+      best = candidates[i];
+    }
   }
   return best;
 }
