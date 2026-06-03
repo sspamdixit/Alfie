@@ -246,9 +246,11 @@ const advanceDebounce = new Map<string, number>();
 
 type NowPlayingCallbackFn = (guildId: string, track: QueueTrack, queue: GuildQueue) => void;
 type TextNotifyFn = (guildId: string, textChannelId: string, message: string) => void;
+type QueueStopCallbackFn = (guildId: string) => void;
 
 let nowPlayingCallback: NowPlayingCallbackFn | null = null;
 let textNotifyCallback: TextNotifyFn | null = null;
+let queueStopCallback: QueueStopCallbackFn | null = null;
 
 export function setNowPlayingCallback(cb: NowPlayingCallbackFn): void {
   nowPlayingCallback = cb;
@@ -256,6 +258,10 @@ export function setNowPlayingCallback(cb: NowPlayingCallbackFn): void {
 
 export function setTextNotifyCallback(cb: TextNotifyFn): void {
   textNotifyCallback = cb;
+}
+
+export function setQueueStopCallback(cb: QueueStopCallbackFn): void {
+  queueStopCallback = cb;
 }
 
 export function initMusic(client: Client): void {
@@ -681,6 +687,7 @@ async function applyResumePosition(
 }
 
 function scheduleAutoDisconnect(guildId: string): void {
+  queueStopCallback?.(guildId);
   setTimeout(async () => {
     const q = queues.get(guildId);
     if (q && !q.current && q.tracks.length === 0 && !q.isAdvancing) {
@@ -1723,6 +1730,7 @@ export async function stopMusic(guildId: string): Promise<boolean> {
   try { await shoukaku?.leaveVoiceChannel(guildId); } catch { /* ignore */ }
   queues.delete(guildId);
   advanceDebounce.delete(guildId);
+  queueStopCallback?.(guildId);
   return true;
 }
 

@@ -51,6 +51,7 @@ import {
   skipToPosition,
   removeDuplicates,
   replayTrack,
+  setQueueStopCallback,
   type QueueTrack,
   type GuildQueue,
   type FilterPreset,
@@ -105,6 +106,69 @@ const trackHistory = new Map<string, Array<{
   requestedBy: string;
   playedAt: number;
 }>>();
+
+// ── Presence management ───────────────────────────────────────────────────────
+const activeNowPlaying = new Map<string, { track: QueueTrack; paused: boolean }>();
+let presenceClient: Client | null = null;
+let idlePresenceIdx = 0;
+let idlePresenceTimer: NodeJS.Timeout | null = null;
+const IDLE_PRESENCE = [
+  "/play a song~ ♡",
+  "type /help for commands~ ♡",
+  "waiting to vibe~ ehehe ♡",
+  "music on demand~ /play ♡",
+  "always here for u~ ♡",
+];
+
+function presenceTrunc(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+function updateBotPresence(): void {
+  const c = presenceClient;
+  if (!c?.user) return;
+  const total = activeNowPlaying.size;
+  if (total === 0) {
+    const msg = IDLE_PRESENCE[idlePresenceIdx % IDLE_PRESENCE.length];
+    c.user.setPresence({ activities: [{ name: msg, type: ActivityType.Listening }], status: "online" });
+    return;
+  }
+  if (total === 1) {
+    const [guildId, state] = [...activeNowPlaying.entries()][0];
+    const djSession = djSessions.get(guildId);
+    let name: string;
+    if (djSession) {
+      name = `🎉 ${presenceTrunc(djSession.genre, 60)} rave`;
+    } else if (state.paused) {
+      name = `⏸ ${presenceTrunc(state.track.title, 100)}`;
+    } else {
+      name = presenceTrunc(`${state.track.title} — ${state.track.author}`, 120);
+    }
+    c.user.setPresence({ activities: [{ name, type: ActivityType.Listening }], status: "online" });
+    return;
+  }
+  c.user.setPresence({ activities: [{ name: `music in ${total} servers~ ♡`, type: ActivityType.Listening }], status: "online" });
+}
+
+function markGuildPaused(guildId: string): void {
+  const state = activeNowPlaying.get(guildId);
+  if (state) { activeNowPlaying.set(guildId, { ...state, paused: true }); updateBotPresence(); }
+}
+
+function markGuildResumed(guildId: string): void {
+  const state = activeNowPlaying.get(guildId);
+  if (state) {
+    activeNowPlaying.set(guildId, { ...state, paused: false });
+    updateBotPresence();
+  } else {
+    const q = getQueue(guildId);
+    if (q?.current) { activeNowPlaying.set(guildId, { track: q.current, paused: false }); updateBotPresence(); }
+  }
+}
+
+function markGuildStopped(guildId: string): void {
+  if (activeNowPlaying.delete(guildId)) updateBotPresence();
+}
 
 // ── DJ role & 24/7 mode ───────────────────────────────────────────────────────
 const djRoles = new Map<string, string>();   // guildId → roleId
@@ -588,10 +652,14 @@ export async function startAlessa(): Promise<void> {
       lastError: null,
     };
 
-    readyClient.user.setPresence({
-      activities: [{ name: "music 🎵", type: ActivityType.Listening }],
-      status: "online",
-    });
+    presenceClient = readyClient;
+    updateBotPresence();
+    if (idlePresenceTimer) clearInterval(idlePresenceTimer);
+    idlePresenceTimer = setInterval(() => {
+      idlePresenceIdx++;
+      if (activeNowPlaying.size === 0) updateBotPresence();
+    }, 30_000);
+    idlePresenceTimer.unref?.();
 
     setRaveClient(readyClient);
     initMusic(readyClient);
@@ -610,6 +678,10 @@ export async function startAlessa(): Promise<void> {
 
       // Don't add TTS tracks to history or post now-playing embeds
       if (isTTS) return;
+
+      // Update bot presence to reflect the new track
+      activeNowPlaying.set(guildId, { track, paused: false });
+      updateBotPresence();
 
       const hist = trackHistory.get(guildId) ?? [];
       hist.unshift({ title: track.title, author: track.author, duration: track.duration, uri: track.uri, requestedBy: track.requestedBy, playedAt: Date.now() });
@@ -640,6 +712,10 @@ export async function startAlessa(): Promise<void> {
     setTextNotifyCallback((guildId, textChannelId, message) => {
       const ch = readyClient.channels.cache.get(textChannelId) as TextChannel | null;
       ch?.send({ content: message, allowedMentions: { parse: [] } }).catch(() => {});
+    });
+
+    setQueueStopCallback((guildId) => {
+      markGuildStopped(guildId);
     });
 
     // Register slash commands per guild
@@ -740,8 +816,10 @@ export async function startAlessa(): Promise<void> {
         if (!q) return;
         if (q.player.paused) {
           await resumeMusic(guildId);
+          markGuildResumed(guildId);
         } else {
           await pauseMusic(guildId);
+          markGuildPaused(guildId);
         }
         const qAfter = getQueue(guildId);
         if (!qAfter?.current) return;
@@ -1046,6 +1124,7 @@ export async function startAlessa(): Promise<void> {
     if (commandName === "pause") {
       try {
         const paused = await pauseMusic(guildId);
+        if (paused) markGuildPaused(guildId);
         await interaction.reply({ content: paused ? "paused~! ♡" : "nothing to pause~ hehe", allowedMentions: { parse: [] } });
       } catch (err: any) { await replyEph(`pause went oopsie~ ${err.message}`); }
       return;
@@ -1054,6 +1133,7 @@ export async function startAlessa(): Promise<void> {
     if (commandName === "resume") {
       try {
         const resumed = await resumeMusic(guildId);
+        if (resumed) markGuildResumed(guildId);
         await interaction.reply({ content: resumed ? "resumed~! ♡" : "nothing to resume~ hehe", allowedMentions: { parse: [] } });
       } catch (err: any) { await replyEph(`resume went oopsie~ ${err.message}`); }
       return;
@@ -1563,6 +1643,7 @@ export async function startAlessa(): Promise<void> {
         if (autoPausedGuilds.has(guildId)) {
           autoPausedGuilds.delete(guildId);
           await resumeMusic(guildId);
+          markGuildResumed(guildId);
           const ch = client?.channels.cache.get(queue.textChannelId) as TextChannel | null;
           ch?.send({ content: "yay, someone's back~! resuming ♡", allowedMentions: { parse: [] } }).catch(() => {});
         }
@@ -1582,6 +1663,7 @@ export async function startAlessa(): Promise<void> {
 
       if (queue.current && !queue.player.paused) {
         await pauseMusic(guildId);
+        markGuildPaused(guildId);
         autoPausedGuilds.add(guildId);
       }
 
