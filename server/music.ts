@@ -960,7 +960,9 @@ function attachPlayerEvents(player: Player, guildId: string): void {
 
     // "replaced" = new track was loaded while something played (intended, already handled)
     // "cleanup"  = node is shutting down (handleNodeDisconnect handles this)
-    // "stopped"  = stopTrack() was called (stopMusic/disconnectMusic marks isStopped first)
+    // "stopped"  = stopTrack() was called intentionally (stopMusic sets isStopped first;
+    //              skipTrack clears current first) — OR the node silently dropped the
+    //              player session mid-song (unintentional drop, current is still set).
     if (reason === "replaced" || reason === "cleanup") return;
 
     const q = queues.get(guildId);
@@ -976,6 +978,16 @@ function attachPlayerEvents(player: Player, guildId: string): void {
     // If a recovery replay is in flight, the "end" event is a side-effect of
     // the replay itself and should not advance the queue.
     if (q.isRecovering) return;
+
+    // An unexpected "stopped" while a track is still current means the node
+    // killed the player session mid-song (the bot didn't call stopTrack).
+    // skipTrack clears current before stopping, so q.current here implies the
+    // drop was involuntary. Attempt recovery to re-resolve and resume from the
+    // last known position rather than silently discarding the track.
+    if (reason === "stopped" && q.current) {
+      void attemptRecovery(player, guildId, "exception", "player stopped unexpectedly");
+      return;
+    }
 
     void advanceQueue(player, guildId);
   });
@@ -1602,7 +1614,10 @@ export async function skipTrack(guildId: string): Promise<QueueTrack | null> {
   const queue = queues.get(guildId);
   if (!queue || !queue.current) return null;
   const skipped = queue.current;
-  // stopTrack fires "stopped" reason on end event → advanceQueue handles it
+  // Clear current BEFORE stopTrack so the "stopped" end event doesn't mistake
+  // this intentional skip for an unexpected mid-song drop and attempt recovery.
+  queue.current = null;
+  queue.recoveryAttempts = 0;
   await queue.player.stopTrack();
   return skipped;
 }
