@@ -12,6 +12,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  Options,
   type VoiceBasedChannel,
 } from "discord.js";
 import { log } from "../server/index";
@@ -470,6 +471,36 @@ export async function startAlfie(): Promise<void> {
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildVoiceStates,
     ],
+
+    // ── Render free-tier memory optimisation ────────────────────────────────
+    // We only request Guilds + GuildVoiceStates intents, so Discord.js will
+    // never populate messages, presences, emojis, stickers, bans, reactions or
+    // threads.  Leaving their managers at the default limit (200) wastes RAM.
+    // A smaller heap → less GC pressure → heartbeats fire on time → no shard
+    // disconnects → no music drops.
+    makeCache: Options.cacheWithLimits({
+      MessageManager: 0,              // no MessageContent intent — nothing arrives
+      GuildMemberManager: 200,        // keep recent members for voice-channel checks
+      UserManager: 0,                 // users are accessible via member.user
+      GuildEmojiManager: 0,           // never referenced in any command
+      GuildStickerManager: 0,         // not used
+      GuildBanManager: 0,             // not used
+      GuildScheduledEventManager: 0,  // not used
+      PresenceManager: 0,             // no GUILD_PRESENCES intent
+      ReactionManager: 0,             // not used
+      StageInstanceManager: 0,        // not used
+      ThreadManager: 0,               // not used
+      ThreadMemberManager: 0,         // not used
+    }),
+
+    // ── REST hardening for Render's throttled network ───────────────────────
+    // Default timeout is 15 s with 3 retries (= up to 60 s blocked).
+    // Cap each attempt at 10 s with 1 retry so a slow Discord edge node can't
+    // stall the event loop long enough to miss a heartbeat.
+    rest: {
+      timeout: 10_000,
+      retries: 1,
+    },
   });
 
   client.once("ready", async (readyClient) => {

@@ -1,3 +1,4 @@
 - [Alfie cleanup](alfie-cleanup.md) — Fred→Alfie migration: what was removed, what was kept, and key wiring decisions.
+- [Render optimisations](render-optimizations.md) — makeCache limits, REST timeout, keep-alive interval tuned for 512 MB / 0.1 CPU free tier.
 - [Search & resolve fixes](search-resolve-fixes.md) — root causes of wrong search results and music drops; all resolve calls now go through resolveWithTimeout.
 - [Node pool & resolver](node-pool-resolver.md) — 12 verified public nodes, quality-based resolver replaces local-first; getNodesByQuality() used everywhere.

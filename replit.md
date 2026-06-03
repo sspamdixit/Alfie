@@ -84,4 +84,21 @@ Bot invite URL uses permission set `36826176`:
 - View Channel, Send Messages, Embed Links, Attach Files, Read Message History,
   Add Reactions, Manage Messages, Connect, Speak, Use VAD
 
+# Render Free-Tier Deployment Notes
+
+Set these additional environment variables in Render's dashboard for best performance:
+
+- `NODE_OPTIONS=--max-old-space-size=400` — caps Node.js heap at 400 MB, leaving ~100 MB for the OS and Shoukaku WS buffers on Render's 512 MB instance; prevents OOM kills
+- `PROGRESS_UPDATES=off` — optional; disables the 7-second progress-bar edits to cut Discord API calls if you want to conserve CPU
+- `RENDER_EXTERNAL_URL` — set to your Render service URL (e.g. `https://alfie.onrender.com`); required for the keep-alive self-ping to work
+
+## What was optimised for Render
+
+| Area | Change | Why |
+|---|---|---|
+| Discord.js cache | `makeCache` limits — messages/presences/emojis/reactions/threads set to 0 | Tiny heap → fast GC → Discord heartbeats always fire → no shard drops → no music stops |
+| Discord.js cache | `GuildMemberManager: 200` | Enough for active music sessions; voice-channel member checks still work |
+| Discord REST | `timeout: 10 000 ms, retries: 1` | Prevents slow Discord edge nodes from blocking the event loop for 60 s |
+| Keep-alive | 10 min → 5 min ping interval | 3× safety margin inside Render's 15-min spin-down window |
+
 # User Preferences

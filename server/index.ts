@@ -133,9 +133,10 @@ function startKeepAlive() {
   }
 
   const pingUrl = `${serviceUrl}/health`;
-  const INTERVAL_MS = 10 * 60 * 1000;
+  // 5-minute interval gives 3× safety margin inside Render's 15-min spin-down window.
+  const INTERVAL_MS = 5 * 60 * 1000;
 
-  log(`Keep-alive active → pinging ${pingUrl} every 10 min`, "keep-alive");
+  log(`Keep-alive active → pinging ${pingUrl} every 5 min`, "keep-alive");
 
   const keepAliveTimer = setInterval(async () => {
     try {
