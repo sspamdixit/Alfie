@@ -1131,25 +1131,47 @@ function bestMatchingTrack(query: string, candidates: any[]): any {
   return best;
 }
 
-// Query all search sources in parallel and return the best-matching result.
-// Running in parallel means no extra wall-clock time vs. the slowest source;
-// scoring means a deep-cut on SoundCloud wins over a wrong YouTube Music hit.
+// Query all search sources in parallel. Return as soon as the first result
+// scores ≥ 1 (at least one query word matched) — covers ~99% of searches
+// without waiting for slower sources like SoundCloud. Only when every early
+// result scores 0 (no word overlap, likely a wrong hit) do we wait for all
+// sources and pick the best-scoring one.
 async function resolveSearch(node: any, query: string): Promise<any | null> {
-  const settled = await Promise.allSettled(
-    SEARCH_PREFIXES.map(async (prefix) => {
-      const result = await node.rest.resolve(`${prefix}:${query}`);
-      if (result?.loadType === "search") {
-        const tracks = (result.data as any[]).filter(t => !isBadTrack(t));
-        return tracks[0] ?? null;
-      }
-      return null;
-    }),
-  );
-  const candidates = settled
-    .map(r => (r.status === "fulfilled" ? r.value : null))
-    .filter((r): r is NonNullable<typeof r> => r !== null);
-  if (!candidates.length) return null;
-  return bestMatchingTrack(query, candidates);
+  const candidates: any[] = [];
+  let remaining = SEARCH_PREFIXES.length;
+
+  return new Promise<any | null>((resolve) => {
+    let done = false;
+    const finish = (result: any | null) => {
+      if (!done) { done = true; resolve(result); }
+    };
+
+    for (const prefix of SEARCH_PREFIXES) {
+      node.rest.resolve(`${prefix}:${query}`)
+        .then((result: any) => {
+          if (done) { remaining--; return; }
+          remaining--;
+          if (result?.loadType === "search") {
+            const tracks = (result.data as any[]).filter((t: any) => !isBadTrack(t));
+            if (tracks.length) {
+              candidates.push(tracks[0]);
+              // Return immediately if this result has any word match — fast path
+              if (trackRelevanceScore(query, tracks[0]) >= 1) {
+                finish(bestMatchingTrack(query, candidates));
+                return;
+              }
+            }
+          }
+          // All sources responded but none had a good score — best effort
+          if (remaining === 0) finish(candidates.length ? bestMatchingTrack(query, candidates) : null);
+        })
+        .catch(() => {
+          if (done) { remaining--; return; }
+          remaining--;
+          if (remaining === 0) finish(candidates.length ? bestMatchingTrack(query, candidates) : null);
+        });
+    }
+  });
 }
 
 async function resolveSearchMultiple(node: any, query: string, limit: number): Promise<any[]> {
