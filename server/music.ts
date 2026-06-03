@@ -171,6 +171,60 @@ export interface GuildQueue {
   isAutoMigrating: boolean;            // guard so watchdog doesn't fire concurrently
 }
 
+// ── Audio filter presets ──────────────────────────────────────────────────────
+export type FilterPreset = "bassboost" | "nightcore" | "vaporwave" | "8d" | "karaoke" | "off";
+const guildFilters = new Map<string, FilterPreset>();
+
+async function applyFilterPreset(player: Player, preset: FilterPreset, guildId: string): Promise<void> {
+  try {
+    await player.clearFilters();
+    switch (preset) {
+      case "bassboost":
+        await player.setEqualizer([
+          { band: 0, gain: 0.65 }, { band: 1, gain: 0.67 }, { band: 2, gain: 0.52 },
+          { band: 3, gain: 0.32 }, { band: 4, gain: 0.18 }, { band: 5, gain: 0.0 },
+          { band: 6, gain: -0.05 }, { band: 7, gain: -0.05 }, { band: 8, gain: -0.05 },
+          { band: 9, gain: -0.05 }, { band: 10, gain: -0.05 }, { band: 11, gain: -0.05 },
+          { band: 12, gain: -0.05 }, { band: 13, gain: -0.05 }, { band: 14, gain: -0.05 },
+        ]);
+        break;
+      case "nightcore":
+        await player.setTimescale({ speed: 1.17, pitch: 1.22, rate: 1.0 });
+        break;
+      case "vaporwave":
+        await player.setTimescale({ speed: 0.85, pitch: 0.85, rate: 1.0 });
+        break;
+      case "8d":
+        await player.setRotation({ rotationHz: 0.2 });
+        break;
+      case "karaoke":
+        await player.setKaraoke({ level: 1.0, monoLevel: 1.0, filterBand: 220.0, filterWidth: 100.0 });
+        break;
+    }
+  } catch (err: any) {
+    log(`[Music] Failed to apply filter "${preset}" in guild ${guildId}: ${err.message}`, "discord");
+  }
+}
+
+export function getGuildFilter(guildId: string): FilterPreset {
+  return guildFilters.get(guildId) ?? "off";
+}
+
+export async function setGuildFilter(guildId: string, preset: FilterPreset): Promise<void> {
+  const q = queues.get(guildId);
+  if (preset === "off") {
+    guildFilters.delete(guildId);
+  } else {
+    guildFilters.set(guildId, preset);
+  }
+  if (!q) return;
+  if (preset === "off") {
+    try { await q.player.clearFilters(); } catch { /* ignore */ }
+  } else {
+    await applyFilterPreset(q.player, preset, guildId);
+  }
+}
+
 // Recovery tuning — try this many times within the window before giving up and skipping.
 const MAX_RECOVERY_ATTEMPTS = 3;
 const RECOVERY_WINDOW_MS = 90_000;
@@ -586,9 +640,14 @@ export function parseSeekTime(input: string): number | null {
 // at neutral 1.0× speed / pitch / rate.
 async function resetPlayerFilters(player: Player, guildId: string): Promise<void> {
   try {
-    await player.clearFilters();
+    const preset = guildFilters.get(guildId);
+    if (preset) {
+      await applyFilterPreset(player, preset, guildId);
+    } else {
+      await player.clearFilters();
+    }
   } catch (err: any) {
-    log(`[Music] Failed to clear filters in guild ${guildId}: ${err.message}`, "discord");
+    log(`[Music] Failed to apply filters in guild ${guildId}: ${err.message}`, "discord");
   }
 }
 
@@ -1854,6 +1913,40 @@ export async function seekTrack(guildId: string, ms: number): Promise<boolean> {
   return true;
 }
 
+export async function skipToPosition(guildId: string, position: number): Promise<boolean> {
+  const queue = queues.get(guildId);
+  if (!queue) return false;
+  if (position < 1 || position > queue.tracks.length) return false;
+  // Drop all tracks before the target so it becomes first when advanceQueue runs
+  queue.tracks.splice(0, position - 1);
+  await skipTrack(guildId);
+  return true;
+}
+
+export function removeDuplicates(guildId: string): number {
+  const queue = queues.get(guildId);
+  if (!queue) return 0;
+  const seen = new Set<string>();
+  if (queue.current) seen.add(queue.current.uri);
+  const before = queue.tracks.length;
+  queue.tracks = queue.tracks.filter((t) => {
+    if (seen.has(t.uri)) return false;
+    seen.add(t.uri);
+    return true;
+  });
+  return before - queue.tracks.length;
+}
+
+export async function replayTrack(guildId: string): Promise<boolean> {
+  const queue = queues.get(guildId);
+  if (!queue || !queue.current) return false;
+  try {
+    await queue.player.seekTo(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function isLavalinkAvailable(): boolean {
   if (!shoukaku) return false;

@@ -46,8 +46,14 @@ import {
   formatDuration,
   setAutoplay,
   isAutoplayEnabled,
+  setGuildFilter,
+  getGuildFilter,
+  skipToPosition,
+  removeDuplicates,
+  replayTrack,
   type QueueTrack,
   type GuildQueue,
+  type FilterPreset,
 } from "../server/music";
 import {
   djSessions,
@@ -99,6 +105,25 @@ const trackHistory = new Map<string, Array<{
   requestedBy: string;
   playedAt: number;
 }>>();
+
+// ── DJ role & 24/7 mode ───────────────────────────────────────────────────────
+const djRoles = new Map<string, string>();   // guildId → roleId
+const guilds247 = new Set<string>();         // guildIds with 24/7 mode enabled
+
+function checkDjPermission(interaction: any, guildId: string): boolean {
+  const roleId = djRoles.get(guildId);
+  if (!roleId) return true;
+  const member = interaction.guild?.members.cache.get(interaction.user.id);
+  if (!member) return false;
+  if (member.permissions?.has("Administrator")) return true;
+  return member.roles.cache.has(roleId);
+}
+
+function djRoleName(guildId: string, guild: any): string {
+  const roleId = djRoles.get(guildId);
+  if (!roleId) return "DJ";
+  return guild?.roles?.cache?.get(roleId)?.name ?? "DJ";
+}
 
 // ── Lyrics fetcher ────────────────────────────────────────────────────────────
 async function fetchLyrics(artist: string, title: string): Promise<string | null> {
@@ -451,6 +476,54 @@ const SLASH_COMMANDS = [
     .setName("speak")
     .setDescription("say something in the voice channel via TTS")
     .addStringOption((o) => o.setName("text").setDescription("text to speak").setRequired(true)),
+  // ── Audio effects ────────────────────────────────────────────────────────────
+  new SlashCommandBuilder()
+    .setName("bassboost")
+    .setDescription("toggle bass boost (mmmm bassy~ ♡)")
+    .addStringOption((o) =>
+      o.setName("level").setDescription("boost level (default: medium)").setRequired(false)
+        .addChoices(
+          { name: "off", value: "off" },
+          { name: "low", value: "low" },
+          { name: "medium", value: "medium" },
+          { name: "high", value: "high" },
+        ),
+    ),
+  new SlashCommandBuilder().setName("nightcore").setDescription("toggle nightcore mode (fast + high pitch~ ♡)"),
+  new SlashCommandBuilder().setName("vaporwave").setDescription("toggle vaporwave mode (slow + dreamy~ ♡)"),
+  new SlashCommandBuilder().setName("8d").setDescription("toggle 8D audio (spins around your head~ ♡)"),
+  new SlashCommandBuilder().setName("karaoke").setDescription("toggle karaoke mode (vocals reduced~ ♡)"),
+  new SlashCommandBuilder()
+    .setName("filter")
+    .setDescription("show or set an audio filter preset")
+    .addStringOption((o) =>
+      o.setName("preset").setDescription("filter preset to apply (leave blank to see current)").setRequired(false)
+        .addChoices(
+          { name: "off — clear all filters", value: "off" },
+          { name: "bassboost — heavy bass", value: "bassboost" },
+          { name: "nightcore — fast + pitched up", value: "nightcore" },
+          { name: "vaporwave — slow + dreamy", value: "vaporwave" },
+          { name: "8d — audio rotates around your head", value: "8d" },
+          { name: "karaoke — reduce vocals", value: "karaoke" },
+        ),
+    ),
+  // ── Queue extras ─────────────────────────────────────────────────────────────
+  new SlashCommandBuilder()
+    .setName("skipto")
+    .setDescription("skip ahead to a specific track in the queue")
+    .addIntegerOption((o) => o.setName("position").setDescription("queue position to jump to").setRequired(true).setMinValue(1)),
+  new SlashCommandBuilder().setName("removedupes").setDescription("remove duplicate tracks from the queue"),
+  new SlashCommandBuilder().setName("replay").setDescription("restart the current track from the beginning"),
+  new SlashCommandBuilder().setName("grab").setDescription("save the current song to your DMs ♡"),
+  // ── Server settings ──────────────────────────────────────────────────────────
+  new SlashCommandBuilder().setName("247").setDescription("toggle 24/7 mode — stay in VC even when everyone leaves"),
+  new SlashCommandBuilder()
+    .setName("djrole")
+    .setDescription("manage the DJ role for this server")
+    .addSubcommand((s) => s.setName("set").setDescription("set the DJ role — only holders can control music")
+      .addRoleOption((o) => o.setName("role").setDescription("the role to use as the DJ role").setRequired(true)))
+    .addSubcommand((s) => s.setName("clear").setDescription("remove the DJ role restriction — anyone can control music"))
+    .addSubcommand((s) => s.setName("show").setDescription("show the current DJ role")),
 ];
 
 // ── Bot startup ───────────────────────────────────────────────────────────────
@@ -744,7 +817,7 @@ export async function startAlessa(): Promise<void> {
       const uptime = botState.uptimeStart ? Math.floor((Date.now() - botState.uptimeStart) / 1000) : null;
       const uptimeStr = uptime != null ? `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${uptime % 60}s` : "unknown";
       await interaction.reply({
-        content: [`**alfie status~ ♡**`, `online: yes~!`, `uptime: ${uptimeStr}`, `servers: ${botState.guildCount}`].join("\n"),
+        content: [`**alessa status~ ♡**`, `online: yes~!`, `uptime: ${uptimeStr}`, `servers: ${botState.guildCount}`].join("\n"),
         allowedMentions: { parse: [] },
       });
       return;
@@ -753,15 +826,17 @@ export async function startAlessa(): Promise<void> {
     if (commandName === "help") {
       await interaction.reply({
         content: [
-          "**alfie — music commands~ ♡**",
+          "**alessa — music commands~ ♡**",
           "",
           "**playback**",
           "`/play <query>` — play a song or playlist",
           "`/playtop <query>` — queue at the front",
           "`/skip` — skip current track (vote-skip with 3+ listeners)",
+          "`/skipto <pos>` — jump straight to a queue position",
           "`/stop` — stop and disconnect",
           "`/pause` / `/resume` — pause or resume",
           "`/seek <time>` — seek to position, e.g. `1:30`",
+          "`/replay` — restart the current track",
           "`/reconnect` — switch to a fresh lavalink node",
           "`/disconnect` — leave the voice channel",
           "",
@@ -775,15 +850,29 @@ export async function startAlessa(): Promise<void> {
           "`/remove <pos>` — remove a track",
           "`/move <from> <to>` — reorder tracks",
           "`/clear` — clear the queue",
+          "`/removedupes` — remove duplicate tracks",
           "`/autoplay` — toggle autoplay",
+          "",
+          "**audio effects~ ✨**",
+          "`/bassboost [off/low/medium/high]` — boom boom bass ♡",
+          "`/nightcore` — fast + high pitch",
+          "`/vaporwave` — slow + dreamy",
+          "`/8d` — audio rotates around your head (use headphones!)",
+          "`/karaoke` — reduce vocals",
+          "`/filter [preset]` — show or set any filter preset",
           "",
           "**extras~**",
           "`/lyrics [song]` — fetch lyrics",
+          "`/grab` — save current song to DMs ♡",
           "`/savequeue <name>` — save the queue as a playlist",
           "`/playlist list/load/delete` — manage playlists",
           "`/rave <genre> [minutes]` — infinite genre rave with DJ mode",
           "`/ravestop` — end the rave",
           "`/speak <text>` — TTS in voice channel",
+          "",
+          "**server settings~**",
+          "`/djrole set/clear/show` — restrict music control to a role",
+          "`/247` — toggle 24/7 mode (stay in VC always)",
         ].join("\n"),
         allowedMentions: { parse: [] },
       });
@@ -792,6 +881,18 @@ export async function startAlessa(): Promise<void> {
 
     // All music commands require a guild
     if (!guildId) { await replyEph("music only works in servers~ sorry ♡"); return; }
+
+    // DJ role gate — music control commands require the DJ role if one is configured
+    const MUSIC_CONTROL_COMMANDS = new Set([
+      "play", "playtop", "skip", "skipto", "stop", "pause", "resume", "volume",
+      "shuffle", "loop", "seek", "remove", "move", "clear", "removedupes", "replay",
+      "bassboost", "nightcore", "vaporwave", "8d", "karaoke", "filter",
+      "rave", "ravestop", "speak", "247",
+    ]);
+    if (MUSIC_CONTROL_COMMANDS.has(commandName) && !checkDjPermission(interaction, guildId)) {
+      await replyEph(`you need the **${djRoleName(guildId, interaction.guild)}** role to control music~ ♡`);
+      return;
+    }
 
     if (commandName === "play") {
       let query = interaction.options.getString("query", true);
@@ -863,7 +964,7 @@ export async function startAlessa(): Promise<void> {
           }
         }
       } catch (err: any) {
-        log(`[Alfie/slash:play] ${err.message}`, "alessa");
+        log(`[Alessa/slash:play] ${err.message}`, "alessa");
         await interaction.editReply({ content: `oopsie~ music went boom: ${err.message}`, allowedMentions: { parse: [] } });
       }
       return;
@@ -1228,6 +1329,212 @@ export async function startAlessa(): Promise<void> {
       }
       return;
     }
+
+    // ── Audio effects ──────────────────────────────────────────────────────────
+
+    if (commandName === "bassboost") {
+      const q = getQueue(guildId);
+      if (!q?.current) { await replyEph("nothing's playing right now~ start a song first ehehe"); return; }
+      const levelStr = interaction.options.getString("level", false) ?? "medium";
+      const FILTER_LABELS: Record<string, string> = {
+        off: "bass boost off~ back to flat ♡",
+        low: "🔊 light bass boost on~! ♡",
+        medium: "🔊 bass boost on~! boom boom ♡",
+        high: "🔊🔊 heavy bass boost~!! your speakers okay?? ♡",
+      };
+      await setGuildFilter(guildId, levelStr === "off" ? "off" : "bassboost");
+      await interaction.reply({ content: FILTER_LABELS[levelStr] ?? FILTER_LABELS.medium, allowedMentions: { parse: [] } });
+      return;
+    }
+
+    if (commandName === "nightcore") {
+      const q = getQueue(guildId);
+      if (!q?.current) { await replyEph("nothing's playing right now~ start a song first ehehe"); return; }
+      const newFilter: FilterPreset = getGuildFilter(guildId) === "nightcore" ? "off" : "nightcore";
+      await setGuildFilter(guildId, newFilter);
+      await interaction.reply({
+        content: newFilter === "nightcore" ? "✨ nightcore on~! speeding up and pitching up~ ehehe ♡" : "nightcore off~ back to normal ♡",
+        allowedMentions: { parse: [] },
+      });
+      return;
+    }
+
+    if (commandName === "vaporwave") {
+      const q = getQueue(guildId);
+      if (!q?.current) { await replyEph("nothing's playing right now~ start a song first ehehe"); return; }
+      const newFilter: FilterPreset = getGuildFilter(guildId) === "vaporwave" ? "off" : "vaporwave";
+      await setGuildFilter(guildId, newFilter);
+      await interaction.reply({
+        content: newFilter === "vaporwave" ? "🌴 vaporwave on~! slowing it down, very a e s t h e t i c ♡" : "vaporwave off~ back to normal ♡",
+        allowedMentions: { parse: [] },
+      });
+      return;
+    }
+
+    if (commandName === "8d") {
+      const q = getQueue(guildId);
+      if (!q?.current) { await replyEph("nothing's playing right now~ start a song first ehehe"); return; }
+      const newFilter: FilterPreset = getGuildFilter(guildId) === "8d" ? "off" : "8d";
+      await setGuildFilter(guildId, newFilter);
+      await interaction.reply({
+        content: newFilter === "8d" ? "🎧 8D audio on~! put on your headphones for the full experience~!! ♡" : "8D off~ back to normal ♡",
+        allowedMentions: { parse: [] },
+      });
+      return;
+    }
+
+    if (commandName === "karaoke") {
+      const q = getQueue(guildId);
+      if (!q?.current) { await replyEph("nothing's playing right now~ start a song first ehehe"); return; }
+      const newFilter: FilterPreset = getGuildFilter(guildId) === "karaoke" ? "off" : "karaoke";
+      await setGuildFilter(guildId, newFilter);
+      await interaction.reply({
+        content: newFilter === "karaoke" ? "🎤 karaoke on~! vocals reduced, time to sing your heart out ♡" : "karaoke off~ vocals back ♡",
+        allowedMentions: { parse: [] },
+      });
+      return;
+    }
+
+    if (commandName === "filter") {
+      const preset = interaction.options.getString("preset", false);
+      if (!preset) {
+        const current = getGuildFilter(guildId);
+        const LABELS: Record<string, string> = {
+          off: "none~ flat playback ♡",
+          bassboost: "🔊 bassboost",
+          nightcore: "✨ nightcore",
+          vaporwave: "🌴 vaporwave",
+          "8d": "🎧 8D audio",
+          karaoke: "🎤 karaoke",
+        };
+        await interaction.reply({ content: `active filter: **${LABELS[current] ?? current}**`, allowedMentions: { parse: [] } });
+        return;
+      }
+      const q = getQueue(guildId);
+      if (!q?.current) { await replyEph("nothing's playing right now~ start a song first ehehe"); return; }
+      await setGuildFilter(guildId, preset as FilterPreset);
+      const ON_MSGS: Record<string, string> = {
+        off: "filters cleared~ back to flat ♡",
+        bassboost: "🔊 bassboost on~! boom boom ♡",
+        nightcore: "✨ nightcore on~! speeding up~ ♡",
+        vaporwave: "🌴 vaporwave on~! very aesthetic ♡",
+        "8d": "🎧 8D audio on~! use headphones~ ♡",
+        karaoke: "🎤 karaoke on~! sing along~ ♡",
+      };
+      await interaction.reply({ content: ON_MSGS[preset] ?? `filter set to **${preset}**~ ♡`, allowedMentions: { parse: [] } });
+      return;
+    }
+
+    // ── Queue extras ───────────────────────────────────────────────────────────
+
+    if (commandName === "skipto") {
+      const pos = interaction.options.getInteger("position", true);
+      const q = getQueue(guildId);
+      if (!q?.tracks.length) { await replyEph("nothing in the queue~ add some songs first hehe"); return; }
+      if (pos < 1 || pos > q.tracks.length) {
+        await replyEph(`that position doesn't exist~ queue only has **${q.tracks.length}** track${q.tracks.length !== 1 ? "s" : ""} ehehe`);
+        return;
+      }
+      const target = q.tracks[pos - 1];
+      cancelDjFades(guildId);
+      try {
+        const ok = await skipToPosition(guildId, pos);
+        await interaction.reply({ content: ok ? `⏭ jumping to **${target.title}**~! ♡` : "oopsie~ couldn't skip there, maybe nothing's playing?", allowedMentions: { parse: [] } });
+      } catch (err: any) {
+        await replyEph(`skipto went oopsie~ ${err.message}`);
+      }
+      return;
+    }
+
+    if (commandName === "removedupes") {
+      const removed = removeDuplicates(guildId);
+      await interaction.reply({
+        content: removed > 0
+          ? `removed **${removed}** duplicate track${removed !== 1 ? "s" : ""} from the queue~! nice and clean ♡`
+          : "no duplicates found~ queue is already clean, ehehe ♡",
+        allowedMentions: { parse: [] },
+      });
+      return;
+    }
+
+    if (commandName === "replay") {
+      try {
+        const ok = await replayTrack(guildId);
+        await interaction.reply({ content: ok ? "🔁 replaying from the start~! ♡" : "nothing's playing right now~ hehe", allowedMentions: { parse: [] } });
+      } catch (err: any) {
+        await replyEph(`replay went oopsie~ ${err.message}`);
+      }
+      return;
+    }
+
+    if (commandName === "grab") {
+      const q = getQueue(guildId);
+      if (!q?.current) { await replyEph("nothing's playing right now~ hehe"); return; }
+      const track = q.current;
+      const isSpotify = /open\.spotify\.com|spotify:/i.test(track.uri);
+      const spotifyLink = isSpotify
+        ? track.uri
+        : `https://open.spotify.com/search/${encodeURIComponent(`${track.title} ${track.author}`)}`;
+      const dmEmbed = new EmbedBuilder()
+        .setTitle("❤️ Saved to your liked songs")
+        .setDescription([`**${track.title}**`, `by ${track.author}`, "", `[Source](${track.uri})` + (isSpotify ? "" : ` · [🎧 Spotify](${spotifyLink})`)].join("\n"))
+        .setURL(track.uri)
+        .setColor(0xed4245);
+      if (track.artworkUrl) dmEmbed.setThumbnail(track.artworkUrl);
+      if (interaction.guild?.name) dmEmbed.setFooter({ text: `from ${interaction.guild.name} ♡` });
+      try {
+        const dm = await interaction.user.createDM();
+        await dm.send({ content: isSpotify ? `🎧 ${spotifyLink}` : `🔗 ${track.uri}\n🎧 ${spotifyLink}`, embeds: [dmEmbed], allowedMentions: { parse: [] } });
+        await interaction.reply({ content: `❤️ saved **${track.title}** to your DMs~! ♡`, ephemeral: true, allowedMentions: { parse: [] } });
+      } catch {
+        await replyEph("couldn't DM you~ make sure your DMs are open for this server ♡");
+      }
+      return;
+    }
+
+    // ── Server settings ────────────────────────────────────────────────────────
+
+    if (commandName === "247") {
+      if (guilds247.has(guildId)) {
+        guilds247.delete(guildId);
+        await interaction.reply({ content: "24/7 mode **off**~ i'll leave when everyone's gone ♡", allowedMentions: { parse: [] } });
+      } else {
+        guilds247.add(guildId);
+        await interaction.reply({ content: "24/7 mode **on**~! i'll stay in VC no matter what, ehehe ♡", allowedMentions: { parse: [] } });
+      }
+      return;
+    }
+
+    if (commandName === "djrole") {
+      const sub = interaction.options.getSubcommand();
+      if (sub === "set") {
+        const role = interaction.options.getRole("role", true);
+        djRoles.set(guildId, role.id);
+        await interaction.reply({ content: `dj role set to **${role.name}**~! only they (and admins) can control music now ♡`, allowedMentions: { parse: [] } });
+        return;
+      }
+      if (sub === "clear") {
+        djRoles.delete(guildId);
+        await interaction.reply({ content: "dj role cleared~! everyone can control music now ♡", allowedMentions: { parse: [] } });
+        return;
+      }
+      if (sub === "show") {
+        const roleId = djRoles.get(guildId);
+        if (!roleId) {
+          await interaction.reply({ content: "no dj role set~ everyone can use music commands ♡", allowedMentions: { parse: [] } });
+        } else {
+          const role = interaction.guild?.roles.cache.get(roleId);
+          await interaction.reply({
+            content: role
+              ? `current dj role: **${role.name}** ♡`
+              : "the saved dj role no longer exists~ use `/djrole set` to set a new one",
+            allowedMentions: { parse: [] },
+          });
+        }
+        return;
+      }
+      return;
+    }
   });
 
   // ── Voice state: auto-disconnect when alone ────────────────────────────────
@@ -1269,6 +1576,9 @@ export async function startAlessa(): Promise<void> {
       if (!channel || (channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStageVoice)) return;
       const humanCount = channel.members.filter((m) => !m.user.bot).size;
       if (humanCount > 0) return;
+
+      // 24/7 mode: stay in VC no matter what — don't pause or start disconnect timer
+      if (guilds247.has(guildId)) return;
 
       if (queue.current && !queue.player.paused) {
         await pauseMusic(guildId);
