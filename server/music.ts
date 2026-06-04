@@ -1166,20 +1166,22 @@ export async function searchTracks(query: string, limit = 5): Promise<SearchResu
   return [];
 }
 
-// Try multiple search sources so YouTube rate-limits don't silently kill search.
-// ytsearch (YouTube Search) is first — it reliably returns the canonical version
-// of a song. ytmsearch routes through YouTube Music on many public nodes via
-// LavaSrc, which can return covers / wrong artists unpredictably, so it goes last.
-const SEARCH_PREFIXES = ["ytsearch", "scsearch", "ytmsearch"];
+// Primary search sources — both are YouTube-based and return canonical results.
+// SoundCloud is intentionally excluded from the parallel race: it surfaces
+// unofficial phonk remixes, mashups and fan covers with the same artist name,
+// causing them to score equally against the original and win on speed.
+// scsearch is retained as a sequential last-resort in resolveSearch /
+// resolveSearchMultiple for when both YouTube sources come up empty.
+const SEARCH_PREFIXES = ["ytsearch", "ytmsearch"];
 
 // Tracks whose titles match this are clearly not the original version the user
 // wants (unless they explicitly typed one of these words in the query).
 // We subtract JUNK_PENALTY from their score so bestMatchingTrack naturally
-// prefers the real track — without hard-blocking (the user CAN request karaoke
-// by typing "/play PYT karaoke").
+// prefers the real track — without hard-blocking (the user CAN request
+// "/play billie jean remix" and still get a remix).
 const JUNK_VERSION_RE =
-  /\b(karaoke|instrumental(?:\s+version)?|nightcore|slowed(?:\s*\+?\s*reverb)?|lo-?fi|lofi|8d(?:\s+audio)?|demo(?:\s+version)?|tribute|minus\s+one|no\s+vocals?|off\s+vocal|in\s+the\s+style\s+of|made\s+popular\s+by|originally\s+performed\s+by|sped[- ]up|speed[- ]up|cover\s+version|background\s+(?:music|version))\b/i;
-const JUNK_PENALTY = 10;
+  /\b(karaoke|instrumental(?:\s+version)?|nightcore|slowed(?:\s*\+?\s*reverb)?|lo-?fi|lofi|8d(?:\s+audio)?|demo(?:\s+version)?|tribute|minus\s+one|no\s+vocals?|off\s+vocal|in\s+the\s+style\s+of|made\s+popular\s+by|originally\s+performed\s+by|sped[- ]up|speed[- ]up|cover\s+version|background\s+(?:music|version)|phonk|remix|mashup|type\s+beat|fan[- ]?(?:made|cover|edit)|ai[- ]?(?:generated|cover|version)|unofficial)\b/i;
+const JUNK_PENALTY = 15;
 
 // LavaSrc on public nodes routes ytmsearch: through Deezer/radio endpoints.
 // Deezer tracks fail with "stream metadata missing"; stream tracks are live-only.
@@ -1207,27 +1209,39 @@ function resolveWithTimeout(node: any, url: string): Promise<any> {
   ]);
 }
 
+// Matches titles/channels from official artist sources.
+// "VEVO" and "- Topic" (YouTube Music auto-generated topic channels) reliably
+// carry the studio recording. "Official Video/Audio/Music Video" is YouTube's
+// own tagging for label-uploaded videos.
+const OFFICIAL_RE = /\b(vevo|official\s+(?:video|audio|music\s+video|lyric\s+video|visualizer)|official$|\s-\s+topic$)/i;
+const OFFICIAL_BOOST = 3;
+
 // Score how closely a Lavalink track result matches the user's query.
 // Normalises both sides to lowercase word tokens, counts overlapping words,
-// then subtracts JUNK_PENALTY if the result title looks like a demo/karaoke/
-// nightcore/etc. version that the user almost certainly didn't want.
-// The penalty is skipped when the user explicitly typed a junk keyword (e.g.
-// "/play PYT karaoke" → karaoke version is correct, don't penalise it).
+// then subtracts JUNK_PENALTY if the result title looks like a phonk/remix/
+// karaoke/etc. version that the user almost certainly didn't want, and adds
+// OFFICIAL_BOOST when the result is from a verified/official source.
+// Both adjustments are skipped when the user explicitly typed the keyword
+// (e.g. "/play billie jean remix" keeps remix results).
 function trackRelevanceScore(query: string, raw: any): number {
   const normalize = (s: string) =>
     s.toLowerCase().replace(/[^a-z0-9]/g, " ").split(/\s+/).filter(w => w.length > 1);
   const queryWords = normalize(query);
   if (!queryWords.length) return 0;
   const title: string = raw?.info?.title ?? "";
+  const channel: string = raw?.info?.author ?? "";
   const resultWords = new Set([
     ...normalize(title),
-    ...normalize(raw?.info?.author ?? ""),
+    ...normalize(channel),
   ]);
   const wordMatch = queryWords.filter(w => resultWords.has(w)).length;
-  // Apply penalty only when the title is a junk version AND the user didn't
-  // ask for it (so "/play PYT instrumental" still works correctly).
+  // Penalise unofficial/junk versions unless the user asked for them.
   const isJunk = JUNK_VERSION_RE.test(title) && !JUNK_VERSION_RE.test(query);
-  return isJunk ? wordMatch - JUNK_PENALTY : wordMatch;
+  // Reward official uploads so they beat equally-scored unofficial versions.
+  const isOfficial = (OFFICIAL_RE.test(title) || OFFICIAL_RE.test(channel)) && !isJunk;
+  let score = isJunk ? wordMatch - JUNK_PENALTY : wordMatch;
+  if (isOfficial) score += OFFICIAL_BOOST;
+  return score;
 }
 
 // Platform resolution reliability ranking.
@@ -1265,12 +1279,13 @@ function bestMatchingTrack(query: string, candidates: any[]): any {
   return best;
 }
 
-// Query all search sources in parallel. Early-exit only when the first result
-// matches ALL query words (score ≥ queryWordCount), so a Billie Eilish track
-// doesn't short-circuit a search for "billie jean michael jackson". If no
-// source achieves a full-word match, we wait for all three and pick the
-// best-scoring candidate — still fast because all requests run concurrently.
-// Every resolve call goes through resolveWithTimeout so a dead node can't stall.
+// Query all search sources in parallel. Early-exit when the first result matches
+// ALL query words AND is from YouTube (not SoundCloud) — this prevents SoundCloud
+// from short-circuiting when it returns fast with a phonk/remix that happens to
+// contain the artist name. If no source achieves a full-word YouTube match we
+// wait for all responses and pick the best-scoring candidate overall.
+// After the parallel phase, scsearch is tried as a last resort only if both
+// YouTube sources returned nothing.
 async function resolveSearch(node: any, query: string): Promise<any | null> {
   const normalize = (s: string) =>
     s.toLowerCase().replace(/[^a-z0-9]/g, " ").split(/\s+/).filter(w => w.length > 1);
@@ -1279,7 +1294,7 @@ async function resolveSearch(node: any, query: string): Promise<any | null> {
   const candidates: any[] = [];
   let remaining = SEARCH_PREFIXES.length;
 
-  return new Promise<any | null>((resolve) => {
+  const ytResult = await new Promise<any | null>((resolve) => {
     let done = false;
     const finish = (result: any | null) => {
       if (!done) { done = true; resolve(result); }
@@ -1293,22 +1308,22 @@ async function resolveSearch(node: any, query: string): Promise<any | null> {
           if (result?.loadType === "search") {
             const tracks = (result.data as any[]).filter((t: any) => !isBadTrack(t));
             if (tracks.length) {
-              // Consider the top 5 results from each source so a demo/karaoke
-              // version ranked #1 by YouTube doesn't block the real track.
+              // Consider the top 5 results so a junk version ranked #1 by
+              // YouTube doesn't block the real track at position #2–5.
               const topN = tracks.slice(0, 5);
               const best = bestMatchingTrack(query, topN);
               candidates.push(best);
               const topScore = trackRelevanceScore(query, best);
               // Early-exit only when ALL query words matched AND the winning
-              // candidate is not a junk version (positive score means no penalty
-              // was applied, i.e. the title isn't a demo/karaoke/nightcore/etc.).
-              if (topScore >= queryWordCount && topScore > 0) {
+              // candidate is from YouTube (priority ≥ 2). SoundCloud candidates
+              // are never allowed to short-circuit — we always wait for YouTube.
+              if (topScore >= queryWordCount && topScore > 0 && platformPriority(best) >= 2) {
                 finish(bestMatchingTrack(query, candidates));
                 return;
               }
             }
           }
-          // All sources responded — pick best effort even if no perfect match
+          // All primary sources responded — pick best effort even if no perfect match
           if (remaining === 0) finish(candidates.length ? bestMatchingTrack(query, candidates) : null);
         })
         .catch(() => {
@@ -1318,10 +1333,26 @@ async function resolveSearch(node: any, query: string): Promise<any | null> {
         });
     }
   });
+
+  if (ytResult) return ytResult;
+
+  // Last resort: SoundCloud. Only reached when both ytsearch and ytmsearch
+  // returned nothing (e.g. a very obscure track or YouTube region-block).
+  try {
+    const sc = await resolveWithTimeout(node, `scsearch:${query}`);
+    if (sc?.loadType === "search") {
+      const tracks = (sc.data as any[]).filter((t: any) => !isBadTrack(t));
+      if (tracks.length) return bestMatchingTrack(query, tracks.slice(0, 5));
+    }
+  } catch { /* no fallback available */ }
+
+  return null;
 }
 
 async function resolveSearchMultiple(node: any, query: string, limit: number): Promise<any[]> {
-  for (const prefix of SEARCH_PREFIXES) {
+  // Try YouTube sources first (serially for predictable ordering in /search results),
+  // then SoundCloud as a last resort if neither YouTube source has the track.
+  for (const prefix of [...SEARCH_PREFIXES, "scsearch"]) {
     try {
       const result = await resolveWithTimeout(node, `${prefix}:${query}`);
       if (result?.loadType === "search") {
