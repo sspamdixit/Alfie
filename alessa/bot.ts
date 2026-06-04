@@ -819,10 +819,20 @@ export async function startAlessa(): Promise<void> {
       // Rave vibe votes are handled in dj.ts
       if (customId.startsWith("rave_fire_") || customId.startsWith("rave_skull_")) return;
 
-      const musicActions = ["music_pause", "music_skip", "music_stop", "music_like", "music_back"];
+      const musicActions = [
+        "music_pause", "music_skip", "music_stop", "music_like", "music_back",
+        "music_shuffle", "music_loop", "music_autoplay", "music_queue",
+      ];
       if (!musicActions.includes(customId)) return;
 
       const action = customId.replace("music_", "");
+
+      const djProtected = ["pause", "skip", "stop", "back", "shuffle", "loop", "autoplay"];
+      if (djProtected.includes(action) && !checkDjPermission(interaction, guildId)) {
+        await interaction.reply({ content: `you need the ${djRoleName(guildId, interaction.guild)} role to control music here~ ♡`, ephemeral: true });
+        return;
+      }
+
       const q = getQueue(guildId);
 
       if (action === "back") {
@@ -925,9 +935,12 @@ export async function startAlessa(): Promise<void> {
         const q2 = getQueue(guildId);
         if (!q2?.current) return;
         await interaction.message.edit({
-          embeds: [await buildNowPlayingEmbed(q2.current, q2)],
+          embeds: [buildNowPlayingEmbedFast(q2.current, q2)],
           components: buildMusicButtons(q2.player.paused, q2),
         }).catch(() => {});
+        void buildNowPlayingEmbed(q2.current, q2).then((rich) =>
+          interaction.message.edit({ embeds: [rich] }).catch(() => {}),
+        );
         return;
       }
 
@@ -937,9 +950,12 @@ export async function startAlessa(): Promise<void> {
         const q2 = getQueue(guildId);
         if (!q2?.current) return;
         await interaction.message.edit({
-          embeds: [await buildNowPlayingEmbed(q2.current, q2)],
+          embeds: [buildNowPlayingEmbedFast(q2.current, q2)],
           components: buildMusicButtons(q2.player.paused, q2),
         }).catch(() => {});
+        void buildNowPlayingEmbed(q2.current, q2).then((rich) =>
+          interaction.message.edit({ embeds: [rich] }).catch(() => {}),
+        );
         return;
       }
 
@@ -951,9 +967,12 @@ export async function startAlessa(): Promise<void> {
         const q3 = getQueue(guildId);
         if (!q3?.current) return;
         await interaction.message.edit({
-          embeds: [await buildNowPlayingEmbed(q3.current, q3)],
+          embeds: [buildNowPlayingEmbedFast(q3.current, q3)],
           components: buildMusicButtons(q3.player.paused, q3),
         }).catch(() => {});
+        void buildNowPlayingEmbed(q3.current, q3).then((rich) =>
+          interaction.message.edit({ embeds: [rich] }).catch(() => {}),
+        );
         return;
       }
 

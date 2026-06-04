@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import { randomBytes } from "crypto";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -40,7 +41,12 @@ app.use((req, res, next) => {
   next();
 });
 
-const sessionSecret = process.env.SESSION_SECRET ?? "alessa-dev-secret-change-in-prod";
+const sessionSecret = process.env.SESSION_SECRET ?? (() => {
+  if (process.env.NODE_ENV === "production") {
+    console.warn("[server] WARNING: SESSION_SECRET is not set — sessions will not persist across restarts");
+  }
+  return randomBytes(32).toString("hex");
+})();
 app.use(
   session({
     secret: sessionSecret,

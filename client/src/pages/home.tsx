@@ -187,7 +187,7 @@ function Dashboard() {
     window.location.reload();
   };
 
-  const uptime = alessa?.uptimeStart ? Date.now() - alfie.uptimeStart : null;
+  const uptime = alessa?.uptimeStart ? Date.now() - alessa.uptimeStart : null;
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>

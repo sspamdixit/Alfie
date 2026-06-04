@@ -18,6 +18,7 @@
 - `DISCORD_CLIENT_ID` — Discord application client ID (for OAuth login and invite URL)
 - `DISCORD_CLIENT_SECRET` — Discord application client secret (for OAuth login)
 - `DASHBOARD_PASSWORD` — Password for the admin dashboard at `/admin`
+- `SESSION_SECRET` — Random secret for signing session cookies; if unset, a random one is generated per boot (sessions won't survive restarts — set this in production)
 - `LAVALINK_URL` — Lavalink server address, e.g. `mynode.example.com:2333`
 - `LAVALINK_PASSWORD` (or `LAVALINK_AUTH`) — Lavalink server password
 - `LAVALINK_SECURE` — set to `true` if the node uses WSS/HTTPS
@@ -41,10 +42,33 @@
 - Commands: `/play`, `/skip`, `/queue`, `/nowplaying`, `/pause`, `/resume`, `/volume`, `/shuffle`, `/loop`, `/seek`, `/lyrics`, `/history`, `/autoplay`, `/savequeue`, `/playlist`, `/rave`, `/ravestop`, `/speak`, `/stop`, `/disconnect`
 - Vote-skip (majority required if 3+ in voice)
 - Auto-disconnect when alone in VC (2-minute grace period)
+- Bot presence reflects currently-playing track in real time; shows idle when nothing is playing
+
+## Now-Playing Embed
+- **Header**: `💿 Now Playing` with album art as a small circular disc icon; changes to `⏸ Paused` in muted grey when paused
+- **Title**: Track title (clickable link to source)
+- **Progress bar**: Live Spotify-style progress bar, updated every 7 seconds
+- **Fields**: Artist and Duration shown as inline fields
+- **Footer**: Live status line — 🔊 volume% • 📋 N in queue • loop state • ✨ autoplay (when on)
+- **Album art**: Fetched from iTunes for high-quality 600×600 art; falls back to Lavalink thumbnail
+
+## Button Rows
+Two rows of buttons appear below every now-playing embed:
+
+**Row 1 — Playback controls:**
+| ⏮ Back | ⏸/▶ Pause/Resume | ⏭ Skip | ⏹ Stop | ❤️ Like |
+
+**Row 2 — Toggles (turn green when active):**
+| 🔀 Shuffle | 🔁/🔂 Loop | ✨ Autoplay | 📋 Queue |
+
+- Loop cycles: off → track → queue → off; button label and footer both update
+- Autoplay and Loop buttons show green (Success style) when enabled
+- 📋 Queue shows an ephemeral list of the next 10 tracks
+- All playback-control buttons are DJ-role gated when a DJ role is configured
 
 ## Music System (`server/music.ts`)
 - Lavalink via Shoukaku
-- Now-playing embeds with Spotify album art and live progress bar
+- Now-playing embeds with iTunes album art and live progress bar
 - Autoplay, node-health watchdog, stuck/exception recovery
 - Saved playlists per user per guild (stored in PostgreSQL)
 
@@ -77,10 +101,21 @@
 - `GET /api/public/guilds` — Managed guilds (requires Discord OAuth)
 - `GET /api/public/guilds/:guildId/info` — Guild info + Alessa presence
 - `GET /api/public/invite-url` — Bot invite URL
-- `POST /api/auth` — Admin dashboard login
+- `POST /api/auth` — Admin dashboard login (rate-limited: 10 req / 15 min per IP)
 - `GET /api/alessa/status` — Alessa bot status (admin only)
 - `GET /api/dj/status` — DJ/rave sessions + Lavalink status (admin only)
 - `GET /api/service/health` — Server uptime (admin only)
+- `GET /tts-audio` — TTS audio proxy for Lavalink (rate-limited: 12 req / min per IP)
+
+## Security
+- All `/api` routes under rate limiter (300 req / 15 min)
+- Admin endpoints require a cryptographically-random dashboard token (issued on password login)
+- Session cookies: `httpOnly`, `secure` in production, `sameSite: none` in production
+- Password comparison uses `timingSafeEqual` (constant-time, prevents timing attacks)
+- Dashboard tokens generated with `crypto.randomBytes(32)`
+- `SESSION_SECRET` generates a random fallback if unset; warns loudly in production
+- TTS endpoint rate-limited (12 req / min per IP) to prevent StreamElements API abuse
+- Bot button interactions enforce DJ role checks server-side
 
 ## Invite URL Permissions
 Bot invite URL uses permission set `36826176`:
@@ -91,6 +126,7 @@ Bot invite URL uses permission set `36826176`:
 
 Set these additional environment variables in Render's dashboard for best performance:
 
+- `SESSION_SECRET` — **Required in production**: a random string to sign session cookies
 - `NODE_OPTIONS=--max-old-space-size=400` — caps Node.js heap at 400 MB, leaving ~100 MB for the OS and Shoukaku WS buffers on Render's 512 MB instance; prevents OOM kills
 - `PROGRESS_UPDATES=off` — optional; disables the 7-second progress-bar edits to cut Discord API calls if you want to conserve CPU
 - `RENDER_EXTERNAL_URL` — set to your Render service URL (e.g. `https://alessa.onrender.com`); required for the keep-alive self-ping to work
@@ -108,5 +144,6 @@ Set these additional environment variables in Render's dashboard for best perfor
 | Discord.js cache | `GuildMemberManager: 200` | Enough for active music sessions; voice-channel member checks still work |
 | Discord REST | `timeout: 10 000 ms, retries: 1` | Prevents slow Discord edge nodes from blocking the event loop for 60 s |
 | Keep-alive | 10 min → 5 min ping interval | 3× safety margin inside Render's 15-min spin-down window |
+| Button handlers | Fast embed first, iTunes art async | Toggle buttons (loop/shuffle/autoplay) respond in <100 ms, album art follows |
 
 # User Preferences

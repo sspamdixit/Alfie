@@ -49,6 +49,14 @@ const authRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many login attempts. Try again later." },
 });
+const ttsRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 12,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.ip ?? "unknown").replace("::ffff:", ""),
+  message: "Rate limit exceeded.",
+});
 
 function safePasswordEquals(input: string, expected: string): boolean {
   const inputDigest = createHash("sha256").update(input).digest();
@@ -81,7 +89,7 @@ export async function registerRoutes(
   app.use("/api", apiRateLimiter);
 
   // ── TTS audio proxy — Lavalink fetches this to play TTS ───────────────────
-  app.get("/tts-audio", async (req: Request, res: Response) => {
+  app.get("/tts-audio", ttsRateLimiter, async (req: Request, res: Response) => {
     const text = ((req.query.text as string) ?? "").trim().slice(0, 450);
     if (!text) { res.status(400).end(); return; }
     const url = `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodeURIComponent(text)}`;
