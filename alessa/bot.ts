@@ -331,12 +331,30 @@ function formatSpotifyProgressBar(track: QueueTrack, queue: GuildQueue): string 
 }
 
 function buildEmbedWithImageUrl(track: QueueTrack, queue: GuildQueue, imageUrl: string | null): EmbedBuilder {
+  const paused = queue.player.paused;
+  const dur = track.isStream ? "🔴 LIVE" : formatDuration(track.duration);
+  const queueLen = queue.tracks.length;
+  const loop: string = (queue.loop as string) ?? "none";
+  const loopLabel = loop === "track" ? "🔂 track" : loop === "queue" ? "🔁 queue" : "off";
+  const footerParts: string[] = [
+    `🔊 ${queue.volume ?? 100}%`,
+    `📋 ${queueLen} in queue`,
+    `loop: ${loopLabel}`,
+  ];
+  if (queue.autoplay) footerParts.push("✨ autoplay");
+
   const embed = new EmbedBuilder()
-    .setColor(EMBED_COLOR)
+    .setColor(paused ? 0x4f545c : EMBED_COLOR)
+    .setAuthor({ name: paused ? "⏸  Paused" : "💿  Now Playing", ...(imageUrl ? { iconURL: imageUrl } : {}) })
     .setTitle(truncateDiscordText(track.title, 256))
     .setURL(track.uri)
-    .setDescription(`\n${formatSpotifyProgressBar(track, queue)}\n`)
-    .setFooter({ text: truncateDiscordText(track.author || "Unknown artist", 2048) });
+    .setDescription(formatSpotifyProgressBar(track, queue))
+    .addFields(
+      { name: "Artist", value: truncateDiscordText(track.author || "Unknown artist", 256), inline: true },
+      { name: "Duration", value: dur, inline: true },
+    )
+    .setFooter({ text: footerParts.join("  •  ") });
+
   if (imageUrl) embed.setThumbnail(imageUrl);
   return embed;
 }
@@ -374,7 +392,7 @@ function scheduleNowPlayingProgressUpdates(message: Message, guildId: string, tr
       try {
         await message.edit({
           embeds: [buildNowPlayingEmbedFast(queue.current!, queue)],
-          components: [buildMusicButtons(queue.player.paused)],
+          components: buildMusicButtons(queue.player.paused, queue),
           allowedMentions: { parse: [] },
         });
       } catch {
@@ -389,14 +407,38 @@ function scheduleNowPlayingProgressUpdates(message: Message, guildId: string, tr
   scheduleNext();
 }
 
-export function buildMusicButtons(paused: boolean): ActionRowBuilder<ButtonBuilder> {
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("music_back").setEmoji("⏮").setLabel("Back").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("music_pause").setEmoji(paused ? "▶️" : "⏸").setLabel(paused ? "Resume" : "Pause").setStyle(paused ? ButtonStyle.Success : ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("music_skip").setEmoji("⏭").setLabel("Skip").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("music_stop").setEmoji("⏹").setLabel("Stop").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId("music_like").setEmoji("❤️").setLabel("Like").setStyle(ButtonStyle.Secondary),
+export function buildMusicButtons(paused: boolean, queue?: GuildQueue): ActionRowBuilder<ButtonBuilder>[] {
+  const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("music_back").setEmoji("⏮").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("music_pause")
+      .setEmoji(paused ? "▶️" : "⏸")
+      .setLabel(paused ? "Resume" : "Pause")
+      .setStyle(paused ? ButtonStyle.Success : ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("music_skip").setEmoji("⏭").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("music_stop").setEmoji("⏹").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("music_like").setEmoji("❤️").setStyle(ButtonStyle.Secondary),
   );
+
+  const loop: string = (queue?.loop as string) ?? "none";
+  const autoplay = queue?.autoplay ?? false;
+
+  const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("music_shuffle").setEmoji("🔀").setLabel("Shuffle").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("music_loop")
+      .setEmoji(loop === "track" ? "🔂" : "🔁")
+      .setLabel(loop === "none" ? "Loop" : loop === "track" ? "Loop: Track" : "Loop: Queue")
+      .setStyle(loop !== "none" ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("music_autoplay")
+      .setEmoji("✨")
+      .setLabel(autoplay ? "Autoplay: On" : "Autoplay")
+      .setStyle(autoplay ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("music_queue").setEmoji("📋").setLabel("Queue").setStyle(ButtonStyle.Secondary),
+  );
+
+  return [row1, row2];
 }
 
 // ── Vote-skip ─────────────────────────────────────────────────────────────────
@@ -696,11 +738,11 @@ export async function startAlessa(): Promise<void> {
           const embed = buildNowPlayingEmbedFast(track, queue);
           const sent = await ch.send({
             embeds: [embed],
-            components: [buildMusicButtons(false)],
+            components: buildMusicButtons(false, queue),
             allowedMentions: { parse: [] },
           });
           void buildNowPlayingEmbed(track, queue).then((richEmbed) => {
-            sent.edit({ embeds: [richEmbed], components: [buildMusicButtons(false)], allowedMentions: { parse: [] } }).catch(() => {});
+            sent.edit({ embeds: [richEmbed], components: buildMusicButtons(false, queue), allowedMentions: { parse: [] } }).catch(() => {});
           });
           scheduleNowPlayingProgressUpdates(sent, guildId, track);
         } catch (err: any) {
@@ -825,7 +867,7 @@ export async function startAlessa(): Promise<void> {
         if (!qAfter?.current) return;
         await interaction.message.edit({
           embeds: [await buildNowPlayingEmbed(qAfter.current, qAfter)],
-          components: [buildMusicButtons(qAfter.player.paused)],
+          components: buildMusicButtons(qAfter.player.paused, qAfter),
         }).catch(() => {});
         scheduleNowPlayingProgressUpdates(interaction.message as Message, guildId, qAfter.current);
         return;
@@ -876,6 +918,61 @@ export async function startAlessa(): Promise<void> {
         }
         return;
       }
+
+      if (action === "shuffle") {
+        await interaction.deferUpdate();
+        shuffleQueue(guildId);
+        const q2 = getQueue(guildId);
+        if (!q2?.current) return;
+        await interaction.message.edit({
+          embeds: [await buildNowPlayingEmbed(q2.current, q2)],
+          components: buildMusicButtons(q2.player.paused, q2),
+        }).catch(() => {});
+        return;
+      }
+
+      if (action === "loop") {
+        await interaction.deferUpdate();
+        cycleLoop(guildId);
+        const q2 = getQueue(guildId);
+        if (!q2?.current) return;
+        await interaction.message.edit({
+          embeds: [await buildNowPlayingEmbed(q2.current, q2)],
+          components: buildMusicButtons(q2.player.paused, q2),
+        }).catch(() => {});
+        return;
+      }
+
+      if (action === "autoplay") {
+        await interaction.deferUpdate();
+        const q2 = getQueue(guildId);
+        if (!q2?.current) return;
+        setAutoplay(guildId, !q2.autoplay);
+        const q3 = getQueue(guildId);
+        if (!q3?.current) return;
+        await interaction.message.edit({
+          embeds: [await buildNowPlayingEmbed(q3.current, q3)],
+          components: buildMusicButtons(q3.player.paused, q3),
+        }).catch(() => {});
+        return;
+      }
+
+      if (action === "queue") {
+        const q2 = getQueue(guildId);
+        if (!q2 || (!q2.current && q2.tracks.length === 0)) {
+          await interaction.reply({ content: "the queue is empty~", ephemeral: true });
+          return;
+        }
+        const lines: string[] = [];
+        if (q2.current) lines.push(`**▶ ${truncateDiscordText(q2.current.title, 60)}**`);
+        q2.tracks.slice(0, 10).forEach((t, i) => {
+          lines.push(`${i + 1}. ${truncateDiscordText(t.title, 60)}`);
+        });
+        if (q2.tracks.length > 10) lines.push(`…and ${q2.tracks.length - 10} more ♡`);
+        await interaction.reply({ content: lines.join("\n"), ephemeral: true });
+        return;
+      }
+
       return;
     }
 
@@ -1017,7 +1114,7 @@ export async function startAlessa(): Promise<void> {
             const result = await joinAndPlay(guildId, voiceChannel.id, interaction.channelId, tracks[0], interaction.guild?.shardId ?? 0, wasActivePlaying);
             if (result === "playing") {
               const q = getQueue(guildId)!;
-              const sent = await interaction.editReply({ embeds: [await buildNowPlayingEmbed(tracks[0], q)], components: [buildMusicButtons(false)], allowedMentions: { parse: [] } });
+              const sent = await interaction.editReply({ embeds: [await buildNowPlayingEmbed(tracks[0], q)], components: buildMusicButtons(false, q), allowedMentions: { parse: [] } });
               scheduleNowPlayingProgressUpdates(sent, guildId, tracks[0]);
             } else {
               const dur = tracks[0].isStream ? "LIVE" : formatDuration(tracks[0].duration);
@@ -1034,7 +1131,7 @@ export async function startAlessa(): Promise<void> {
           const result = await joinAndPlay(guildId, voiceChannel.id, interaction.channelId, track, interaction.guild?.shardId ?? 0, wasActivePlaying);
           if (result === "playing") {
             const q = getQueue(guildId)!;
-            const sent = await interaction.editReply({ embeds: [await buildNowPlayingEmbed(track, q)], components: [buildMusicButtons(false)], allowedMentions: { parse: [] } });
+            const sent = await interaction.editReply({ embeds: [await buildNowPlayingEmbed(track, q)], components: buildMusicButtons(false, q), allowedMentions: { parse: [] } });
             scheduleNowPlayingProgressUpdates(sent, guildId, track);
           } else {
             const dur = track.isStream ? "LIVE" : formatDuration(track.duration);
@@ -1060,7 +1157,7 @@ export async function startAlessa(): Promise<void> {
         const result = await addToFront(guildId, voiceChannel.id, interaction.channelId, track, interaction.guild?.shardId ?? 0);
         if (result === "playing") {
           const q = getQueue(guildId)!;
-          const sent = await interaction.editReply({ embeds: [await buildNowPlayingEmbed(track, q)], components: [buildMusicButtons(false)], allowedMentions: { parse: [] } });
+          const sent = await interaction.editReply({ embeds: [await buildNowPlayingEmbed(track, q)], components: buildMusicButtons(false, q), allowedMentions: { parse: [] } });
           scheduleNowPlayingProgressUpdates(sent, guildId, track);
         } else {
           const dur = track.isStream ? "LIVE" : formatDuration(track.duration);
@@ -1165,7 +1262,7 @@ export async function startAlessa(): Promise<void> {
       const q = getQueue(guildId);
       if (!q?.current) { await interaction.reply({ content: "nothing's playing right now~ hehe", allowedMentions: { parse: [] } }); return; }
       await interaction.deferReply();
-      const sent = await interaction.editReply({ embeds: [await buildNowPlayingEmbed(q.current, q)], components: [buildMusicButtons(q.player.paused)], allowedMentions: { parse: [] } });
+      const sent = await interaction.editReply({ embeds: [await buildNowPlayingEmbed(q.current, q)], components: buildMusicButtons(q.player.paused, q), allowedMentions: { parse: [] } });
       scheduleNowPlayingProgressUpdates(sent, guildId, q.current);
       return;
     }
