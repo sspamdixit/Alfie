@@ -1436,6 +1436,28 @@ async function spotifyFallbackRaw(url: string): Promise<any | null> {
   return resolveSearchAnyNode(q);
 }
 
+async function fetchYouTubeOEmbed(url: string): Promise<{ title: string; author: string } | null> {
+  try {
+    const oe = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+    const res = await fetch(oe, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) return null;
+    const data = await res.json() as { title?: string; author_name?: string };
+    if (!data.title) return null;
+    return { title: data.title, author: data.author_name ?? "" };
+  } catch {
+    return null;
+  }
+}
+
+// YouTube URL fallback: fetch metadata via oEmbed, then do a text search.
+// More reliable than ytsearch:URL across public nodes (most reject URL-shaped queries).
+async function youTubeFallbackRaw(url: string): Promise<any | null> {
+  const meta = await fetchYouTubeOEmbed(url);
+  if (!meta) return null;
+  const q = meta.author ? `${meta.author} ${meta.title}` : meta.title;
+  return resolveSearchAnyNode(q);
+}
+
 export async function resolveTrack(
   query: string,
   requestedBy: string,
@@ -1467,20 +1489,10 @@ export async function resolveTrack(
       raw = await spotifyFallbackRaw(query);
     }
 
-    // YouTube URL fallback: public nodes often block direct URL resolution.
-    // Try ytsearch first (most reliable), then scsearch, then ytmsearch.
+    // YouTube URL fallback: oEmbed → text search.
+    // The old ytsearch:URL approach was unreliable — most public nodes reject URL-shaped queries.
     if (!raw && /youtu\.?be/i.test(query)) {
-      for (const prefix of ["ytsearch", "scsearch", "ytmsearch"]) {
-        try {
-          const r = await resolveWithTimeout(node, `${prefix}:${query}`);
-          if (r?.loadType === "search") {
-            const tracks = (r.data as any[]).filter(t => !isDeezerTrack(t));
-            if (tracks.length) { raw = tracks[0]; break; }
-          } else if (r?.loadType === "track") {
-            raw = r.data; break;
-          }
-        } catch { /* try next */ }
-      }
+      raw = await youTubeFallbackRaw(query);
     }
 
     // Generic HTTP/HTTPS URL fallback (covers TTS proxy, direct audio files, etc.).
@@ -1554,6 +1566,29 @@ export async function resolvePlaylist(
           };
         }
       }
+    }
+
+    // YouTube URL fallback: oEmbed → text search (mirrors Spotify pattern)
+    if (/youtu\.?be/i.test(query)) {
+      const raw = await youTubeFallbackRaw(query);
+      if (raw) return { tracks: [rawToTrack(raw, requestedBy)], playlistName: null };
+    }
+
+    // Generic fallback: try remaining nodes in quality order for any URL type.
+    // resolvePlaylist previously never retried other nodes — this fills that gap.
+    for (const n of getNodesByQuality().filter(n => n !== node)) {
+      try {
+        const r = await resolveWithTimeout(n, query);
+        if (r?.loadType === "track") return { tracks: [rawToTrack(r.data, requestedBy)], playlistName: null };
+        if (r?.loadType === "playlist") {
+          const d = r.data as any;
+          return { tracks: (d.tracks as any[]).map((t: any) => rawToTrack(t, requestedBy)), playlistName: d.info?.name ?? null };
+        }
+        if (r?.loadType === "search") {
+          const tks = (r.data as any[]).filter((t: any) => !isDeezerTrack(t));
+          if (tks.length) return { tracks: [rawToTrack(tks[0], requestedBy)], playlistName: null };
+        }
+      } catch { /* try next */ }
     }
   } else {
     // Non-URL: cascade ytmsearch → ytsearch → scsearch across all nodes
