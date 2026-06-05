@@ -1362,17 +1362,33 @@ async function resolveSearch(node: any, query: string): Promise<any | null> {
 }
 
 async function resolveSearchMultiple(node: any, query: string, limit: number): Promise<any[]> {
-  // Try YouTube sources first (serially for predictable ordering in /search results),
-  // then SoundCloud as a last resort if neither YouTube source has the track.
-  for (const prefix of [...SEARCH_PREFIXES, "scsearch"]) {
-    try {
-      const result = await resolveWithTimeout(node, `${prefix}:${query}`);
-      if (result?.loadType === "search") {
-        const tracks = (result.data as any[]).filter(t => !isBadTrack(t));
-        if (tracks.length) return tracks.slice(0, limit);
-      }
-    } catch { /* try next source */ }
-  }
+  // Run ytsearch and ytmsearch in parallel — whichever returns results first wins.
+  // This is critical for autocomplete: Discord has a 3 s hard deadline and serial
+  // source-chaining (8 s each) reliably blows past it.
+  const ytResults = await Promise.race(
+    [...SEARCH_PREFIXES].map(prefix =>
+      resolveWithTimeout(node, `${prefix}:${query}`)
+        .then((result: any) => {
+          if (result?.loadType === "search") {
+            const tracks = (result.data as any[]).filter(t => !isBadTrack(t));
+            if (tracks.length) return tracks.slice(0, limit);
+          }
+          return [] as any[];
+        })
+        .catch(() => [] as any[]),
+    ).map(p => p.then((r: any[]) => { if (r.length) return r; return new Promise<any[]>(() => {}); })),
+  ).catch(() => [] as any[]);
+
+  if (ytResults && (ytResults as any[]).length) return ytResults as any[];
+
+  // Last resort: SoundCloud (only when both YouTube sources truly came up empty).
+  try {
+    const sc = await resolveWithTimeout(node, `scsearch:${query}`);
+    if (sc?.loadType === "search") {
+      const tracks = (sc.data as any[]).filter(t => !isBadTrack(t));
+      if (tracks.length) return tracks.slice(0, limit);
+    }
+  } catch { /* no fallback */ }
   return [];
 }
 

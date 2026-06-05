@@ -779,7 +779,10 @@ export async function startAlessa(): Promise<void> {
       const focused = interaction.options.getFocused();
       if (!focused || focused.length < 2) { await interaction.respond([]); return; }
       try {
-        const results = await searchTracks(focused, 12);
+        const results = await Promise.race([
+          searchTracks(focused, 12),
+          new Promise<[]>(res => setTimeout(() => res([]), 2500)),
+        ]);
         const seen = new Set<string>();
         const dedupedItems: Array<{ uri: string; text: string; label: string }> = [];
         for (const t of results) {
