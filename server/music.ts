@@ -686,18 +686,30 @@ async function applyResumePosition(
   }
 }
 
+const AUTO_DISCONNECT_MS = 5 * 60 * 1000; // 5 minutes
+
 function scheduleAutoDisconnect(guildId: string): void {
   queueStopCallback?.(guildId);
+  // Notify the text channel that the queue is empty and give a countdown.
+  const q0 = queues.get(guildId);
+  if (q0) {
+    textNotifyCallback?.(
+      guildId,
+      q0.textChannelId,
+      `queue's empty — i'll hang around for 5 minutes in case you want to add more songs ♪`,
+    );
+  }
   setTimeout(async () => {
     const q = queues.get(guildId);
     if (q && !q.current && q.tracks.length === 0 && !q.isAdvancing) {
+      textNotifyCallback?.(guildId, q.textChannelId, `no songs queued in 5 minutes — disconnecting, byebye ♡`);
       try {
         await shoukaku?.leaveVoiceChannel(guildId);
       } catch { /* ignore */ }
       queues.delete(guildId);
-      log(`[Music] Auto-disconnected from guild ${guildId} (queue empty).`, "discord");
+      log(`[Music] Auto-disconnected from guild ${guildId} (queue empty after 5 min).`, "discord");
     }
-  }, 30_000);
+  }, AUTO_DISCONNECT_MS);
 }
 
 // Per-guild autoplay preference, persists even when no queue/player exists
@@ -1180,7 +1192,7 @@ const SEARCH_PREFIXES = ["ytsearch", "ytmsearch"];
 // prefers the real track — without hard-blocking (the user CAN request
 // "/play billie jean remix" and still get a remix).
 const JUNK_VERSION_RE =
-  /\b(karaoke|instrumental(?:\s+version)?|nightcore|slowed(?:\s*\+?\s*reverb)?|lo-?fi|lofi|8d(?:\s+audio)?|demo(?:\s+version)?|tribute|minus\s+one|no\s+vocals?|off\s+vocal|in\s+the\s+style\s+of|made\s+popular\s+by|originally\s+performed\s+by|sped[- ]up|speed[- ]up|cover\s+version|background\s+(?:music|version)|phonk|remix|mashup|type\s+beat|fan[- ]?(?:made|cover|edit)|ai[- ]?(?:generated|cover|version)|unofficial)\b/i;
+  /\b(karaoke|instrumental(?:\s+version)?|nightcore|slowed(?:\s*\+?\s*reverb)?|lo-?fi|lofi|8d(?:\s+audio)?|demo(?:\s+version)?|tribute|minus\s+one|no\s+vocals?|off\s+vocal|in\s+the\s+style\s+of|made\s+popular\s+by|originally\s+performed\s+by|sped[- ]up|speed[- ]up|cover\s+version|background\s+(?:music|version)|phonk|remix|mashup|type\s+beat|fan[- ]?(?:made|cover|edit)|ai[- ]?(?:generated|cover|version)|unofficial|live(?:\s+at|\s+from|\s+version|\s+performance|\s+session)?|acoustic(?:\s+version)?|extended(?:\s+version)?|piano(?:\s+version)?|orchestral(?:\s+version)?|stripped(?:\s+version)?)\b/i;
 const JUNK_PENALTY = 15;
 
 // LavaSrc on public nodes routes ytmsearch: through Deezer/radio endpoints.
