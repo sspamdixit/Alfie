@@ -990,6 +990,16 @@ async function attemptRecovery(
         // Keep the queue entry up to date so subsequent recoveries also get the fresh token.
         track.encoded = fresh.encoded;
         log(`[Music] Re-resolved fresh encoded for "${track.title}" in guild ${guildId}.`, "discord");
+      } else if (cause === "exception") {
+        // Re-resolution returned nothing — every node failed to find the track.
+        // Retrying with the old stale encoded that caused the exception would just
+        // loop and fail 3 times. Skip immediately instead.
+        log(`[Music] Re-resolve returned null for "${track.title}" in guild ${guildId} — skipping.`, "discord");
+        textNotifyCallback?.(guildId, q.textChannelId, `couldn't re-fetch **${track.title}** — skipping.`);
+        q.recoveryAttempts = 0;
+        q.isRecovering = false;
+        void advanceQueue(player, guildId);
+        return;
       }
     } catch (err: any) {
       log(`[Music] Re-resolve failed for "${track.title}" in guild ${guildId}: ${err.message} — using cached encoded.`, "discord");
@@ -1087,14 +1097,22 @@ function attachPlayerEvents(player: Player, guildId: string): void {
 
     // Permanently unplayable track patterns — skip immediately instead of
     // wasting 3 recovery attempts replaying the same broken source.
-    // Covers: Deezer (stream metadata), LavaSrc provider errors, ended live streams.
+    // Covers: Deezer errors, LavaSrc provider errors, ended live streams,
+    // YouTube age/region/copyright blocks, and bot-detection rate limits.
     const isUnrecoverable =
       /deezer/i.test(msg) ||
       q.current?.isStream === true ||
       /stream.{0,30}(metadata|identifier|missing|ended|unavailable)/i.test(msg) ||
       /not (playable|available|found)/i.test(msg) ||
       /no (track|song|result)/i.test(msg) ||
-      /\b(403|404|410)\b/.test(msg);
+      /\b(403|404|410|429)\b/.test(msg) ||
+      /video.{0,40}(unavailable|removed|deleted|private|blocked|restricted)/i.test(msg) ||
+      /age.{0,20}(restricted|gated|verif)/i.test(msg) ||
+      /copyright/i.test(msg) ||
+      /this video is not available/i.test(msg) ||
+      /sign in to confirm/i.test(msg) ||
+      /playback.{0,30}(not|country|region)/i.test(msg) ||
+      /content.{0,20}(country|region|blocked)/i.test(msg);
 
     if (isUnrecoverable) {
       log(`[Music] Unrecoverable track error ("${msg}") — skipping immediately.`, "discord");
@@ -1362,26 +1380,25 @@ async function resolveSearch(node: any, query: string): Promise<any | null> {
 }
 
 async function resolveSearchMultiple(node: any, query: string, limit: number): Promise<any[]> {
-  // Run ytsearch and ytmsearch in parallel — whichever returns results first wins.
-  // This is critical for autocomplete: Discord has a 3 s hard deadline and serial
-  // source-chaining (8 s each) reliably blows past it.
-  const ytResults = await Promise.race(
-    [...SEARCH_PREFIXES].map(prefix =>
-      resolveWithTimeout(node, `${prefix}:${query}`)
-        .then((result: any) => {
-          if (result?.loadType === "search") {
-            const tracks = (result.data as any[]).filter(t => !isBadTrack(t));
-            if (tracks.length) return tracks.slice(0, limit);
-          }
-          return [] as any[];
-        })
-        .catch(() => [] as any[]),
-    ).map(p => p.then((r: any[]) => { if (r.length) return r; return new Promise<any[]>(() => {}); })),
-  ).catch(() => [] as any[]);
+  // Fire ytsearch and ytmsearch concurrently. Promise.any resolves with the first
+  // source that returns non-empty results — keeping us inside Discord's 3 s
+  // autocomplete deadline instead of serially chaining 8 s timeouts.
+  const searches = [...SEARCH_PREFIXES].map(prefix =>
+    resolveWithTimeout(node, `${prefix}:${query}`)
+      .then((result: any) => {
+        if (result?.loadType === "search") {
+          const tracks = (result.data as any[]).filter(t => !isBadTrack(t));
+          if (tracks.length) return tracks.slice(0, limit);
+        }
+        throw new Error("no results");
+      }),
+  );
 
-  if (ytResults && (ytResults as any[]).length) return ytResults as any[];
+  try {
+    return await Promise.any(searches);
+  } catch { /* all YouTube sources came up empty */ }
 
-  // Last resort: SoundCloud (only when both YouTube sources truly came up empty).
+  // Last resort: SoundCloud (only reached when both YouTube sources returned nothing).
   try {
     const sc = await resolveWithTimeout(node, `scsearch:${query}`);
     if (sc?.loadType === "search") {
