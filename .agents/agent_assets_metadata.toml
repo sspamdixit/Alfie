@@ -1,8 +1,19 @@
 uploads = []
-generated = []
+
+[[generated]]
+id = "04R82yrZ71_euo75q1CrP"
+uri = "file://attached_assets/misa-favicon.png"
+type = "image"
+title = "misa amane favicon"
 
 [[outputs]]
 id = "cUTBlAjfepaX5WRBgzXBO"
 uri = "file://bubbl-manager.tar.gz"
 type = "unspecified"
 title = "bubbl-manager.tar.gz"
+
+[[outputs]]
+id = "tjrnb3sxFCfyiYuLMflXx"
+uri = "file://attached_assets/misa-favicon.png"
+type = "image"
+title = "Misa Amane favicon"

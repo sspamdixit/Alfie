@@ -88,6 +88,17 @@ export async function registerRoutes(
 ): Promise<Server> {
   app.use("/api", apiRateLimiter);
 
+  // ── /invite — public redirect to Discord bot invite URL ──────────────────
+  app.get("/invite", (_req, res) => {
+    try {
+      const url = getBotInviteUrl();
+      return res.redirect(302, url);
+    } catch {
+      // DISCORD_CLIENT_ID not set — send to Discord homepage as fallback
+      return res.redirect(302, "https://discord.com");
+    }
+  });
+
   // ── TTS audio proxy — Lavalink fetches this to play TTS ───────────────────
   app.get("/tts-audio", ttsRateLimiter, async (req: Request, res: Response) => {
     const text = ((req.query.text as string) ?? "").trim().slice(0, 450);
