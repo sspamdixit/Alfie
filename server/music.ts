@@ -984,12 +984,17 @@ async function attemptRecovery(
       // on this node (e.g. SoundCloud URI, no plugin), the precise metadata search
       // finds the correct track rather than returning null or a wrong version.
       const textFallback = [track.author, track.title].filter(Boolean).join(" ");
-      const fresh = await resolveTrack(track.uri, track.requestedBy, textFallback || undefined);
+      // Smart node fallback: exclude the player's current node from re-resolution so we
+      // always get a fresh encoded token from a different node. If the current node had
+      // a streaming issue (YouTube bot-detection, rate-limit, etc.) the old node would
+      // return the same broken token. A fresh node is far more likely to succeed.
+      const failingNode = getPlayerNode(player);
+      const fresh = await resolveTrack(track.uri, track.requestedBy, textFallback || undefined, failingNode ?? undefined);
       if (fresh?.encoded) {
         encodedToPlay = fresh.encoded;
         // Keep the queue entry up to date so subsequent recoveries also get the fresh token.
         track.encoded = fresh.encoded;
-        log(`[Music] Re-resolved fresh encoded for "${track.title}" in guild ${guildId}.`, "discord");
+        log(`[Music] Re-resolved fresh encoded for "${track.title}" in guild ${guildId}${failingNode ? ` (excluded failing node "${failingNode.name}")` : ""}.`, "discord");
       } else if (cause === "exception") {
         // Re-resolution returned nothing — every node failed to find the track.
         // Retrying with the old stale encoded that caused the exception would just
@@ -1413,8 +1418,12 @@ async function resolveSearchMultiple(node: any, query: string, limit: number): P
 // order so the best node is tried first (same ranking as the resolver).
 // The first two nodes are tried concurrently via Promise.any for speed;
 // remaining nodes are tried serially as a last resort.
-async function resolveSearchAnyNode(query: string): Promise<any | null> {
-  const ordered = getNodesByQuality();
+// Pass excludeNode to skip a node that is known to be failing (e.g. the player's
+// current node during recovery so we always re-resolve on a fresh node).
+async function resolveSearchAnyNode(query: string, excludeNode?: any): Promise<any | null> {
+  const all = getNodesByQuality();
+  if (!all.length) return null;
+  const ordered = excludeNode ? all.filter(n => n !== excludeNode) : all;
   if (!ordered.length) return null;
 
   // Try the top two quality nodes concurrently — whichever wins first is used.
@@ -1507,10 +1516,14 @@ export async function resolveTrack(
   query: string,
   requestedBy: string,
   fallbackQuery?: string,   // text search fallback when URI resolution fails
+  excludeNode?: any,        // skip this node (e.g. the player's failing node during recovery)
 ): Promise<QueueTrack | null> {
   if (!shoukaku) throw new Error("Music not initialised.");
 
-  const node = shoukaku.getIdealNode();
+  // Prefer a node that isn't the known-failing one; fall back to ideal if nothing else available.
+  const allNodes = getNodesByQuality();
+  const freshNodes = excludeNode ? allNodes.filter(n => n !== excludeNode) : allNodes;
+  const node = freshNodes[0] ?? shoukaku.getIdealNode();
   if (!node) throw new Error("No Lavalink nodes available.");
 
   const isUrl = /^https?:\/\//i.test(query);
@@ -1540,10 +1553,11 @@ export async function resolveTrack(
       raw = await youTubeFallbackRaw(query);
     }
 
-    // Generic HTTP/HTTPS URL fallback (covers TTS proxy, direct audio files, etc.).
-    // Walk nodes in quality order (best first) since HTTP source support varies.
+    // Generic HTTP/HTTPS URL fallback — walk remaining nodes in quality order,
+    // skipping both the initial node and the known-failing exclude node.
     if (!raw) {
-      for (const n of getNodesByQuality().filter(n => n !== node)) {
+      const fallbackPool = getNodesByQuality().filter(n => n !== node && n !== excludeNode);
+      for (const n of fallbackPool) {
         try {
           const r = await resolveWithTimeout(n, query);
           if (r?.loadType === "track") { raw = r.data; break; }
@@ -1557,11 +1571,11 @@ export async function resolveTrack(
 
     // URI resolution fully failed — if caller gave us a text fallback, use it
     if (!raw && fallbackQuery) {
-      raw = await resolveSearchAnyNode(fallbackQuery);
+      raw = await resolveSearchAnyNode(fallbackQuery, excludeNode);
     }
   } else {
-    // Non-URL: cascade ytmsearch → ytsearch → scsearch across all nodes
-    raw = await resolveSearchAnyNode(query);
+    // Non-URL: search across all nodes, skipping the known-failing one
+    raw = await resolveSearchAnyNode(query, excludeNode);
   }
 
   if (!raw) return null;
