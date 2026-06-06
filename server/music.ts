@@ -236,7 +236,7 @@ export async function setGuildFilter(guildId: string, preset: FilterPreset): Pro
 }
 
 // Recovery tuning — try this many times within the window before giving up and skipping.
-const MAX_RECOVERY_ATTEMPTS = 3;
+const MAX_RECOVERY_ATTEMPTS = 5;
 const RECOVERY_WINDOW_MS = 90_000;
 
 // Node-health watchdog tuning.
@@ -253,6 +253,33 @@ const joiningGuilds = new Set<string>();
 
 // Debounce map: prevents duplicate advanceQueue calls within a short window
 const advanceDebounce = new Map<string, number>();
+
+// ── Frozen queue preservation ─────────────────────────────────────────────────
+// When ALL recovery attempts after a node outage fail, the queue is saved here.
+// Automatically restored the next time /play is called in the same guild.
+// TTL: 30 minutes — after that the data is stale and discarded.
+interface FrozenQueueSnapshot {
+  tracks: QueueTrack[];            // current track (if any) prepended at [0]
+  textChannelId: string;
+  voiceChannelId: string;
+  volume: number;
+  loop: LoopMode;
+  autoplay: boolean;
+  recentSeeds: QueueTrack[];
+  recentlyPlayedUris: string[];
+  frozenAt: number;
+}
+const frozenQueues = new Map<string, FrozenQueueSnapshot>();
+const FROZEN_QUEUE_TTL_MS = 30 * 60 * 1000;
+
+// One-shot pop: returns and removes the snapshot (or null if expired/missing).
+function popFrozenQueue(guildId: string): FrozenQueueSnapshot | null {
+  const entry = frozenQueues.get(guildId);
+  if (!entry) return null;
+  frozenQueues.delete(guildId);
+  if (Date.now() - entry.frozenAt > FROZEN_QUEUE_TTL_MS) return null;
+  return entry;
+}
 
 type NowPlayingCallbackFn = (guildId: string, track: QueueTrack, queue: GuildQueue) => void;
 type TextNotifyFn = (guildId: string, textChannelId: string, message: string) => void;
@@ -455,8 +482,9 @@ async function recoverQueueOnNewNode(
 ): Promise<boolean> {
   if (!shoukaku) return false;
 
+  // getIdealNode() is used for track re-resolution only — we still attempt to
+  // join even if it's temporarily null (node may be reconnecting).
   const idealNode = shoukaku.getIdealNode();
-  if (!idealNode) return false;
 
   // Re-resolve the current track to get a fresh encoded token.
   // The old encoded is node-specific and expires when a node cycles.
@@ -517,6 +545,75 @@ async function recoverQueueOnNewNode(
   }
 }
 
+// ── Recovery retry helper ─────────────────────────────────────────────────────
+// Retries recoverQueueOnNewNode up to 3 times with increasing back-off before
+// giving up. On total failure the snapshot is frozen so the user's queue is
+// never permanently lost — it auto-restores on the next /play within 30 min.
+const RECOVERY_BACKOFF_MS = [5_000, 15_000, 30_000] as const;
+
+async function recoverWithRetry(
+  guildId: string,
+  snapshot: Parameters<typeof recoverQueueOnNewNode>[1],
+  nodeName: string,
+  reason: "close" | "disconnect",
+): Promise<void> {
+  const maxAttempts = RECOVERY_BACKOFF_MS.length + 1; // 4 total
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      const delay = RECOVERY_BACKOFF_MS[attempt - 1];
+      log(`[Music] Recovery retry ${attempt}/${maxAttempts - 1} for guild ${guildId} in ${delay}ms…`, "discord");
+      await new Promise<void>((r) => setTimeout(r, delay));
+    }
+
+    // Another event may have already recovered this guild while we waited.
+    if (queues.has(guildId)) return;
+
+    const ok = await recoverQueueOnNewNode(guildId, snapshot);
+    if (ok) {
+      const nodeName2 = (queues.get(guildId)?.player as any)?.node?.name ?? "unknown";
+      const posMsg = snapshot.resumePositionMs > 0
+        ? ` from ${formatDuration(snapshot.resumePositionMs)}`
+        : "";
+      const msgs: Record<"close" | "disconnect", string> = {
+        close:      `node hiccup — back on **${nodeName2}**, resuming${posMsg}.`,
+        disconnect: `node dropped — reconnected on **${nodeName2}**, resuming${posMsg}.`,
+      };
+      textNotifyCallback?.(guildId, snapshot.textChannelId, msgs[reason]);
+      log(`[Music] Recovered guild ${guildId} after "${nodeName}" ${reason} (attempt ${attempt + 1}).`, "discord");
+      return;
+    }
+  }
+
+  // ── All attempts failed — freeze the queue so it survives the outage ──────
+  const allTracks = snapshot.toResume
+    ? [snapshot.toResume, ...snapshot.upcomingTracks]
+    : [...snapshot.upcomingTracks];
+
+  if (allTracks.length > 0) {
+    frozenQueues.set(guildId, {
+      tracks: allTracks,
+      textChannelId: snapshot.textChannelId,
+      voiceChannelId: snapshot.voiceChannelId,
+      volume: snapshot.volume,
+      loop: snapshot.loop,
+      autoplay: snapshot.autoplay,
+      recentSeeds: [...snapshot.recentSeeds],
+      recentlyPlayedUris: [...snapshot.recentlyPlayedUris],
+      frozenAt: Date.now(),
+    });
+    textNotifyCallback?.(
+      guildId,
+      snapshot.textChannelId,
+      `all nodes are down — your queue (${allTracks.length} track${allTracks.length === 1 ? "" : "s"}) is frozen. use /play to restore it once nodes recover.`,
+    );
+    log(`[Music] Frozen ${allTracks.length} track(s) for guild ${guildId} after "${nodeName}" ${reason} — all recovery attempts exhausted.`, "discord");
+  } else {
+    textNotifyCallback?.(guildId, snapshot.textChannelId, "all nodes are down — reconnect once they recover.");
+    log(`[Music] Could not recover guild ${guildId} after "${nodeName}" ${reason} — no nodes, empty queue.`, "discord");
+  }
+}
+
 // Called on abnormal node close (e.g. 1006). Shoukaku will reconnect automatically,
 // but the player session on the closed node is lost — music silently stops.
 // We snapshot active queues, wait briefly for the node to stabilise, then
@@ -564,21 +661,8 @@ async function handleNodeClose(nodeName: string): Promise<void> {
   await new Promise<void>((r) => setTimeout(r, 4000));
 
   for (const [guildId, snapshot] of affected) {
-    // If something else already recovered this guild, skip.
     if (queues.has(guildId)) continue;
-
-    const ok = await recoverQueueOnNewNode(guildId, snapshot);
-    if (ok) {
-      const nodeName2 = (queues.get(guildId)?.player as any)?.node?.name ?? "unknown";
-      const resumeMsg = snapshot.resumePositionMs > 0
-        ? `node hiccup — back on **${nodeName2}**, resuming from ${formatDuration(snapshot.resumePositionMs)}.`
-        : `node hiccup — back on **${nodeName2}**, resuming.`;
-      textNotifyCallback?.(guildId, snapshot.textChannelId, resumeMsg);
-      log(`[Music] Recovered guild ${guildId} after "${nodeName}" close.`, "discord");
-    } else {
-      textNotifyCallback?.(guildId, snapshot.textChannelId, "lost connection to audio — all nodes may be busy. use /play to restart.");
-      log(`[Music] Could not recover guild ${guildId} after "${nodeName}" close — no nodes available.`, "discord");
-    }
+    await recoverWithRetry(guildId, snapshot, nodeName, "close");
   }
 }
 
@@ -613,15 +697,7 @@ async function handleNodeDisconnect(nodeName: string): Promise<void> {
     // Brief delay so Shoukaku finishes teardown before we rejoin.
     await new Promise<void>((r) => setTimeout(r, 500));
 
-    const ok = await recoverQueueOnNewNode(guildId, snapshot);
-    if (ok) {
-      const resumeMsg = snapshot.resumePositionMs > 0
-        ? `node dropped — reconnected and resuming from ${formatDuration(snapshot.resumePositionMs)}.`
-        : "node dropped — reconnected and resuming queue.";
-      textNotifyCallback?.(guildId, snapshot.textChannelId, resumeMsg);
-    } else {
-      textNotifyCallback?.(guildId, snapshot.textChannelId, "tried to recover but all nodes are down. use /play to restart.");
-    }
+    await recoverWithRetry(guildId, snapshot, nodeName, "disconnect");
   }
 }
 
@@ -920,9 +996,29 @@ async function advanceQueue(player: Player, guildId: string): Promise<void> {
         await applyResumePosition(player, guildId, next, q);
         nowPlayingCallback?.(guildId, next, q);
         return; // Successfully started next track
-      } catch (err: any) {
-        log(`[Music] Failed to play track "${next.title}" in guild ${guildId}: ${err.message}`, "discord");
-        // Track failed — loop will try the next one
+      } catch (playErr: any) {
+        log(`[Music] Failed to play track "${next.title}" in guild ${guildId}: ${playErr.message} — re-resolving on alternate node.`, "discord");
+        // The encoded token is node-specific and may be stale. Try re-resolving
+        // on a different node before silently dropping the track.
+        if (next.uri) {
+          try {
+            const failingNode = getPlayerNode(player);
+            const fresh = await resolveTrack(next.uri, next.requestedBy, undefined, failingNode ?? undefined);
+            if (fresh?.encoded) {
+              await resetPlayerFilters(player, guildId);
+              await player.playTrack({ track: { encoded: fresh.encoded } });
+              const reResolved = { ...next, encoded: fresh.encoded };
+              q.current = reResolved;
+              await player.setGlobalVolume(q.volume);
+              await applyResumePosition(player, guildId, reResolved, q);
+              nowPlayingCallback?.(guildId, reResolved, q);
+              log(`[Music] Re-resolved and now playing "${next.title}" in guild ${guildId}.`, "discord");
+              return;
+            }
+          } catch { /* re-resolve also failed — skip track */ }
+        }
+        log(`[Music] Skipping "${next.title}" in guild ${guildId} — could not re-resolve.`, "discord");
+        // Track is truly unplayable — continue while-loop to next track
       }
     }
   } finally {
@@ -1772,6 +1868,24 @@ export async function joinAndPlay(
     } finally {
       joiningGuilds.delete(guildId);
     }
+
+    // Restore any frozen queue from a previous all-nodes-down outage.
+    // Frozen tracks go AFTER the new track so the user's request plays first.
+    const frozen = popFrozenQueue(guildId);
+    if (frozen && frozen.tracks.length > 0) {
+      queue.tracks.push(...frozen.tracks);
+      queue.volume = frozen.volume;
+      queue.loop = frozen.loop;
+      queue.autoplay = frozen.autoplay;
+      queue.recentSeeds = [...frozen.recentSeeds];
+      queue.recentlyPlayedUris = [...frozen.recentlyPlayedUris];
+      log(`[Music] Restored ${frozen.tracks.length} frozen track(s) for guild ${guildId}.`, "discord");
+      textNotifyCallback?.(
+        guildId,
+        textChannelId,
+        `🔁 restored ${frozen.tracks.length} frozen track${frozen.tracks.length === 1 ? "" : "s"} from before the outage.`,
+      );
+    }
   }
 
   // forceQueue is set when the caller snapshotted an active session before an
@@ -1813,6 +1927,23 @@ export async function joinAndPlayMultiple(
       queue = await createQueue(guildId, voiceChannelId, textChannelId, shardId);
     } finally {
       joiningGuilds.delete(guildId);
+    }
+
+    // Restore any frozen queue — frozen tracks go after the new batch.
+    const frozen = popFrozenQueue(guildId);
+    if (frozen && frozen.tracks.length > 0) {
+      queue.tracks.push(...frozen.tracks);
+      queue.volume = frozen.volume;
+      queue.loop = frozen.loop;
+      queue.autoplay = frozen.autoplay;
+      queue.recentSeeds = [...frozen.recentSeeds];
+      queue.recentlyPlayedUris = [...frozen.recentlyPlayedUris];
+      log(`[Music] Restored ${frozen.tracks.length} frozen track(s) for guild ${guildId}.`, "discord");
+      textNotifyCallback?.(
+        guildId,
+        textChannelId,
+        `🔁 restored ${frozen.tracks.length} frozen track${frozen.tracks.length === 1 ? "" : "s"} from before the outage.`,
+      );
     }
   }
 
