@@ -260,7 +260,7 @@ export default function LandingPage() {
             pointerEvents: "none",
           }} />
           <img
-            src="/cross-transparent.png"
+            src="/chrome-hearts-cross.svg"
             alt=""
             draggable={false}
             style={{
@@ -270,7 +270,7 @@ export default function LandingPage() {
               pointerEvents: "none",
               transform: `perspective(900px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) translate(${offset.x * 0.5}px, ${offset.y * 0.5}px)`,
               willChange: "transform",
-              filter: `drop-shadow(0 0 48px rgba(196,30,58,0.28)) drop-shadow(0 8px 40px rgba(0,0,0,0.9))`,
+              filter: `invert(1) sepia(1) saturate(4) hue-rotate(295deg) brightness(0.9) drop-shadow(0 0 48px rgba(196,30,58,0.55)) drop-shadow(0 8px 40px rgba(0,0,0,0.9))`,
               position: "relative",
               zIndex: 1,
             }}
