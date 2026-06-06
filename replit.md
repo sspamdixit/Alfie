@@ -23,6 +23,7 @@
 - `LAVALINK_PASSWORD` (or `LAVALINK_AUTH`) — Lavalink server password
 - `LAVALINK_SECURE` — set to `true` if the node uses WSS/HTTPS
 - `LAVALINK_NODES` — optional JSON array of additional nodes (see Render notes below)
+- `ENABLE_TTS` — Set to `true` to enable the `/speak` ambient TTS feature. **Requires Message Content Intent enabled in Discord Developer Portal → Bot → Privileged Gateway Intents.** If unset (default), the bot starts normally without TTS — omitting this prevents the "Intents blocked" login error on Render
 
 # Architecture Notes
 

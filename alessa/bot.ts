@@ -650,12 +650,22 @@ export async function startAlessa(): Promise<void> {
     client = null;
   }
 
+  // GuildMessages + MessageContent are privileged intents that require manual
+  // activation in the Discord Developer Portal (Bot → Privileged Gateway
+  // Intents).  Only request them when ENABLE_TTS=true so the bot can always
+  // come online even if the operator hasn't toggled the intent yet.
+  const ttsEnabled = process.env.ENABLE_TTS === "true";
+  if (!ttsEnabled) {
+    log("[Alessa] ENABLE_TTS not set — /speak TTS disabled. Set ENABLE_TTS=true and enable Message Content Intent in Discord portal to activate it.", "alessa");
+  }
+
   client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildVoiceStates,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.MessageContent,
+      ...(ttsEnabled
+        ? [GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+        : []),
     ],
 
     // ── Render free-tier memory optimisation ────────────────────────────────
@@ -1841,9 +1851,9 @@ export async function startAlessa(): Promise<void> {
   });
 
   // ── Ambient TTS listener ────────────────────────────────────────────────────
-  // For every message in a guild that has an active TTS session, speak the text
-  // if the author matches the session owner and the channel matches.
-  client.on("messageCreate", async (msg) => {
+  // Only registered when ENABLE_TTS=true (MessageContent intent is active).
+  // Without MessageContent, msg.content is always empty — no point listening.
+  if (ttsEnabled) client.on("messageCreate", async (msg) => {
     if (msg.author.bot || !msg.guildId) return;
     const session = activeTTSSessions.get(msg.guildId);
     if (!session) return;
