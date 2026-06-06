@@ -81,10 +81,41 @@ function normalizeLavalinkNode(raw: any, fallbackName: string): LavalinkNodeConf
   return { name, url, auth, secure };
 }
 
+// ── Hardcoded public community Lavalink node pool ────────────────────────────
+// Sourced from: lavalink.darrennathanael.com · free.lavalink.rf.gd ·
+//   github.com/AjieDev/Free-Lavalink · heavencloud.in · github.com/alfari24/lavalink-lists
+// These are used automatically when LAVALINK_NODES env var is not set.
+// Override with LAVALINK_NODES (JSON array) to use your own list instead.
+const PUBLIC_NODE_POOL: LavalinkNodeConfig[] = [
+  // ── Serenetia (AjieDev) — SSL, v4 ──────────────────────────────────────────
+  { name: "serenetia-v4-ssl",    url: "lavalinkv4.serenetia.com:443",      auth: "https://dsc.gg/ajidevserver", secure: true  },
+  { name: "serenetia-ssl",       url: "lavalink.serenetia.com:443",        auth: "https://dsc.gg/ajidevserver", secure: true  },
+  // ── HeavenCloud — SSL, multi-region, 30+ sources ───────────────────────────
+  { name: "heavencloud-in",      url: "lavalink.heavencloud.in:443",       auth: "heavencloud",                 secure: true  },
+  { name: "heavencloud-us",      url: "us.lavalink.heavencloud.in:443",    auth: "heavencloud",                 secure: true  },
+  { name: "heavencloud-sg",      url: "sg.lavalink.heavencloud.in:443",    auth: "heavencloud",                 secure: true  },
+  { name: "heavencloud-eu",      url: "eu.lavalink.heavencloud.in:443",    auth: "heavencloud",                 secure: true  },
+  // ── Jirayu — SSL, v4 ───────────────────────────────────────────────────────
+  { name: "jirayu-ssl",          url: "lavalink.jirayu.net:443",           auth: "youshallnotpass",             secure: true  },
+  // ── NextGenCoders — SSL, v4, many plugins ──────────────────────────────────
+  { name: "nextgencoders-ssl",   url: "lavalink.nextgencoders.xyz:443",    auth: "nextgencoderspvt",            secure: true  },
+  // ── Millohost — SSL, v4 ────────────────────────────────────────────────────
+  { name: "millohost-ssl",       url: "lava-v4.millohost.my.id:443",       auth: "https://discord.gg/mjS5J2K3ep", secure: true },
+  // ── Serenetia — non-SSL, v4 (fallback) ─────────────────────────────────────
+  { name: "serenetia-v4-nossl",  url: "lavalinkv4.serenetia.com:80",       auth: "https://dsc.gg/ajidevserver", secure: false },
+  // ── HeavenCloud — non-SSL ──────────────────────────────────────────────────
+  { name: "heavencloud-nossl",   url: "lavalink.heavencloud.in:2333",      auth: "heavencloud",                 secure: false },
+  // ── Jirayu — non-SSL ───────────────────────────────────────────────────────
+  { name: "jirayu-nossl",        url: "lavalink.jirayu.net:13592",         auth: "youshallnotpass",             secure: false },
+  // ── Triniumhost — non-SSL, v4 ──────────────────────────────────────────────
+  { name: "triniumhost",         url: "lavalink.triniumhost.com:4333",     auth: "free",                        secure: false },
+  // ── G3V (UK) — non-SSL ─────────────────────────────────────────────────────
+  { name: "g3v-uk",              url: "lava.g3v.co.uk:9008",               auth: "lavalinklol",                 secure: false },
+];
+
 function getLavalinkNodes(): LavalinkNodeConfig[] {
-  // ── LAVALINK_NODES JSON array ─────────────────────────────────────────────
-  // Only public/community nodes are used. Private self-hosted nodes (LAVALINK_URL)
-  // are intentionally ignored — set LAVALINK_NODES with your public node list.
+  // ── LAVALINK_NODES JSON override ─────────────────────────────────────────
+  // If set, these replace the built-in public pool entirely.
   const rawNodes = process.env.LAVALINK_NODES?.trim();
   if (rawNodes) {
     try {
@@ -94,17 +125,18 @@ function getLavalinkNodes(): LavalinkNodeConfig[] {
         .map((node, index) => normalizeLavalinkNode(node, `node-${index + 1}`))
         .filter((node): node is LavalinkNodeConfig => Boolean(node));
       if (nodes.length) {
-        log(`[Music] Using ${nodes.length} public node(s) from LAVALINK_NODES: ${nodes.map(n => n.name).join(", ")}`, "discord");
+        log(`[Music] Using ${nodes.length} node(s) from LAVALINK_NODES override: ${nodes.map(n => n.name).join(", ")}`, "discord");
         return nodes;
       }
-      log("[Music] LAVALINK_NODES was set but contained no valid nodes.", "discord");
+      log("[Music] LAVALINK_NODES was set but contained no valid nodes — falling back to public pool.", "discord");
     } catch (err: any) {
-      log(`[Music] Could not parse LAVALINK_NODES JSON: ${err.message}`, "discord");
+      log(`[Music] Could not parse LAVALINK_NODES JSON: ${err.message} — falling back to public pool.`, "discord");
     }
   }
 
-  log("[Music] No Lavalink nodes configured. Set LAVALINK_NODES (JSON array) to enable music.", "discord");
-  return [];
+  // ── Default: built-in public community node pool ─────────────────────────
+  log(`[Music] Using ${PUBLIC_NODE_POOL.length} built-in public community nodes. Set LAVALINK_NODES to override.`, "discord");
+  return [...PUBLIC_NODE_POOL];
 }
 
 export interface QueueTrack {

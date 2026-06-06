@@ -79,7 +79,11 @@ Two rows of buttons appear below every now-playing embed:
 - Session recap posted on stop
 
 ## TTS (`server/tts.ts`)
-- `/speak <text>` — StreamElements Brian voice via Lavalink
+- `/speak` — ambient TTS session; every message you type in that channel is spoken aloud
+- Fully Lavalink-independent: uses `@discordjs/voice` directly
+- 3 TTS providers tried in parallel (first success wins): StreamElements Brian, Google Translate TTS, ResponsiveVoice
+- Session ends when you run `/speak` again, leave the VC, or call `/stop`/`/disconnect`
+- **Requires**: Message Content Intent enabled in Discord Developer Portal → Bot → Privileged Gateway Intents
 
 ## Dashboard
 - React frontend in `client/`
@@ -105,7 +109,6 @@ Two rows of buttons appear below every now-playing embed:
 - `GET /api/alessa/status` — Alessa bot status (admin only)
 - `GET /api/dj/status` — DJ/rave sessions + Lavalink status (admin only)
 - `GET /api/service/health` — Server uptime (admin only)
-- `GET /tts-audio` — TTS audio proxy for Lavalink (rate-limited: 12 req / min per IP)
 
 ## Security
 - All `/api` routes under rate limiter (300 req / 15 min)
@@ -114,7 +117,6 @@ Two rows of buttons appear below every now-playing embed:
 - Password comparison uses `timingSafeEqual` (constant-time, prevents timing attacks)
 - Dashboard tokens generated with `crypto.randomBytes(32)`
 - `SESSION_SECRET` generates a random fallback if unset; warns loudly in production
-- TTS endpoint rate-limited (12 req / min per IP) to prevent StreamElements API abuse
 - Bot button interactions enforce DJ role checks server-side
 
 ## Invite URL Permissions
@@ -130,11 +132,11 @@ Set these additional environment variables in Render's dashboard for best perfor
 - `NODE_OPTIONS=--max-old-space-size=400` — caps Node.js heap at 400 MB, leaving ~100 MB for the OS and Shoukaku WS buffers on Render's 512 MB instance; prevents OOM kills
 - `PROGRESS_UPDATES=off` — optional; disables the 7-second progress-bar edits to cut Discord API calls if you want to conserve CPU
 - `RENDER_EXTERNAL_URL` — set to your Render service URL (e.g. `https://alessa.onrender.com`); required for the keep-alive self-ping to work
-- `LAVALINK_NODES` — JSON array of extra Lavalink nodes for redundancy. No node credentials are hardcoded in the source; everything is configured via env vars. Format:
+- `LAVALINK_NODES` — (optional) JSON array to **override** the built-in public node pool. Alessa ships with 14 hardcoded community nodes so music works out of the box. Only set this if you want to use your own nodes exclusively. Format:
   ```json
-  [{"name":"node-2","url":"host:port","auth":"password","secure":false}]
+  [{"name":"my-node","url":"host:port","auth":"password","secure":false}]
   ```
-  Public community node lists (regularly verified): https://lavalink.darrennathanael.com · https://nodes.lavalink.rf.gd
+  Live community node directories: https://lavalink.darrennathanael.com · https://free.lavalink.rf.gd/list · https://lavainfo.netlify.app
 
 ## What was optimised for Render
 
