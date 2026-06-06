@@ -49,14 +49,6 @@ const authRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many login attempts. Try again later." },
 });
-const ttsRateLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 12,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => (req.ip ?? "unknown").replace("::ffff:", ""),
-  message: "Rate limit exceeded.",
-});
 
 function safePasswordEquals(input: string, expected: string): boolean {
   const inputDigest = createHash("sha256").update(input).digest();
@@ -96,25 +88,6 @@ export async function registerRoutes(
     } catch {
       // DISCORD_CLIENT_ID not set — send to Discord homepage as fallback
       return res.redirect(302, "https://discord.com");
-    }
-  });
-
-  // ── TTS audio proxy — Lavalink fetches this to play TTS ───────────────────
-  app.get("/tts-audio", ttsRateLimiter, async (req: Request, res: Response) => {
-    const text = ((req.query.text as string) ?? "").trim().slice(0, 450);
-    if (!text) { res.status(400).end(); return; }
-    const url = `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodeURIComponent(text)}`;
-    try {
-      const upstream = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-      if (!upstream.ok) { res.status(502).end(); return; }
-      res.setHeader("Content-Type", upstream.headers.get("content-type") ?? "audio/mpeg");
-      const cl = upstream.headers.get("content-length");
-      if (cl) res.setHeader("Content-Length", cl);
-      res.setHeader("Cache-Control", "no-store");
-      const buf = await upstream.arrayBuffer();
-      res.end(Buffer.from(buf));
-    } catch {
-      res.status(502).end();
     }
   });
 

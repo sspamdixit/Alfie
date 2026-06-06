@@ -1,4 +1,5 @@
 - [Alessa rename](alessa-rename.md) — full Alfie→Alessa rename; backward compat env vars kept; bot folder is now `alessa/`.
 - [Render optimisations](render-optimizations.md) — makeCache limits, REST timeout, keep-alive interval tuned for 512 MB / 0.1 CPU free tier.
 - [Search & resolve fixes](search-resolve-fixes.md) — root causes of wrong search results and music drops; all resolve calls now go through resolveWithTimeout.
-- [Node pool & resolver](node-pool-resolver.md) — 12 verified public nodes, quality-based resolver replaces local-first; getNodesByQuality() used everywhere.
+- [Node pool & resolver](node-pool-resolver.md) — LAVALINK_URL ignored; only LAVALINK_NODES used; quality-based resolver.
+- [TTS architecture](tts-architecture.md) — TTS is fully Lavalink-independent; uses @discordjs/voice + 3 HTTP providers.

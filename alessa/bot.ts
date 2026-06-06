@@ -65,7 +65,7 @@ import {
   cancelDjFades,
   setRaveClient,
 } from "../server/dj";
-import { speakInVoice } from "../server/tts";
+import { speakInVoice, setTTSClient, disconnectTTS } from "../server/tts";
 import { storage } from "../server/storage";
 
 export interface AlessaBotStatus {
@@ -711,21 +711,17 @@ export async function startAlessa(): Promise<void> {
 
     setRaveClient(readyClient);
     initMusic(readyClient);
+    setTTSClient(readyClient);
 
     setNowPlayingCallback((guildId, track, queue) => {
-      const isTTS = track.title.startsWith("[TTS]");
-
       const session = djSessions.get(guildId);
-      if (session && !isTTS) {
+      if (session) {
         onDjTrackStart(guildId, track, queue.volume, queue.player);
         const q = getQueue(guildId);
         if (q && q.tracks.length < 3) {
           void refillDjQueue(guildId, session);
         }
       }
-
-      // Don't add TTS tracks to history or post now-playing embeds
-      if (isTTS) return;
 
       // Update bot presence to reflect the new track
       activeNowPlaying.set(guildId, { track, paused: false });
@@ -1212,6 +1208,7 @@ export async function startAlessa(): Promise<void> {
       try {
         onDjStop(guildId);
         activeTTSSessions.delete(guildId);
+        disconnectTTS(guildId);
         const stopped = await stopMusic(guildId);
         await interaction.reply({ content: stopped ? "stopped~! see you soon ♡" : "i wasn't even playing anything~ ehehe", allowedMentions: { parse: [] } });
       } catch (err: any) {
@@ -1223,6 +1220,7 @@ export async function startAlessa(): Promise<void> {
     if (commandName === "disconnect") {
       try {
         activeTTSSessions.delete(guildId);
+        disconnectTTS(guildId);
         const done = await disconnectMusic(guildId);
         await interaction.reply({ content: done ? "disconnected~! byebye ♡" : "i'm not even in a voice channel~ hehe", allowedMentions: { parse: [] } });
       } catch (err: any) {
@@ -1527,6 +1525,7 @@ export async function startAlessa(): Promise<void> {
       const existing = activeTTSSessions.get(guildId);
       if (existing && existing.userId === interaction.user.id) {
         activeTTSSessions.delete(guildId);
+        disconnectTTS(guildId);
         await interaction.reply({ content: "tts session ended~ back to silence ♡", allowedMentions: { parse: [] } });
         return;
       }
@@ -1801,6 +1800,7 @@ export async function startAlessa(): Promise<void> {
     const ttsSession = activeTTSSessions.get(guildId);
     if (ttsSession && oldState.id === ttsSession.userId && leftChannelId === ttsSession.voiceChannelId) {
       activeTTSSessions.delete(guildId);
+      disconnectTTS(guildId);
       const ttsNotifCh = client?.channels.cache.get(ttsSession.textChannelId) as TextChannel | null;
       ttsNotifCh?.send({ content: "you left the vc~ ending tts session ♡", allowedMentions: { parse: [] } }).catch(() => {});
     }
