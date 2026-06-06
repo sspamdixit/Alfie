@@ -82,50 +82,28 @@ function normalizeLavalinkNode(raw: any, fallbackName: string): LavalinkNodeConf
 }
 
 function getLavalinkNodes(): LavalinkNodeConfig[] {
-  // ── Multi-node JSON config (LAVALINK_NODES) ───────────────────────────────
-  // If set, these nodes are used *in addition to* any single local node below.
-  // They will always appear after the local node so the resolver tries local first.
-  let extraNodes: LavalinkNodeConfig[] = [];
+  // ── LAVALINK_NODES JSON array ─────────────────────────────────────────────
+  // Only public/community nodes are used. Private self-hosted nodes (LAVALINK_URL)
+  // are intentionally ignored — set LAVALINK_NODES with your public node list.
   const rawNodes = process.env.LAVALINK_NODES?.trim();
   if (rawNodes) {
     try {
       const parsed = JSON.parse(rawNodes);
       const nodeList = Array.isArray(parsed) ? parsed : [parsed];
-      extraNodes = nodeList
+      const nodes = nodeList
         .map((node, index) => normalizeLavalinkNode(node, `node-${index + 1}`))
         .filter((node): node is LavalinkNodeConfig => Boolean(node));
-      if (!extraNodes.length) {
-        log("[Music] LAVALINK_NODES was set but contained no valid nodes.", "discord");
+      if (nodes.length) {
+        log(`[Music] Using ${nodes.length} public node(s) from LAVALINK_NODES: ${nodes.map(n => n.name).join(", ")}`, "discord");
+        return nodes;
       }
+      log("[Music] LAVALINK_NODES was set but contained no valid nodes.", "discord");
     } catch (err: any) {
       log(`[Music] Could not parse LAVALINK_NODES JSON: ${err.message}`, "discord");
     }
   }
 
-  // ── Single local node (LAVALINK_URL / LAVALINK_PASSWORD) ─────────────────
-  // Named "local" so the custom node resolver can identify and prefer it.
-  const localNode = normalizeLavalinkNode(
-    {
-      name: LOCAL_NODE_NAME,
-      url: process.env.LAVALINK_URL,
-      auth: process.env.LAVALINK_AUTH || process.env.LAVALINK_PASSWORD,
-      secure: process.env.LAVALINK_SECURE,
-    },
-    LOCAL_NODE_NAME,
-  );
-
-  // ── Build final node list ─────────────────────────────────────────────────
-  // Order: local first → any LAVALINK_NODES extras.
-  // The qualityNodeResolver selects the best node at runtime regardless of
-  // registration order, so local gets no automatic routing preference.
-  if (localNode) {
-    log(`[Music] Local Lavalink node configured at ${localNode.url}${extraNodes.length ? ` — ${extraNodes.length} extra node(s) from LAVALINK_NODES` : ""}.`, "discord");
-    return [localNode, ...extraNodes];
-  }
-
-  if (extraNodes.length) return extraNodes;
-
-  log("[Music] No Lavalink nodes configured. Set LAVALINK_URL + LAVALINK_PASSWORD (and optionally LAVALINK_NODES) to enable music.", "discord");
+  log("[Music] No Lavalink nodes configured. Set LAVALINK_NODES (JSON array) to enable music.", "discord");
   return [];
 }
 
@@ -1046,6 +1024,16 @@ function attachPlayerEvents(player: Player, guildId: string): void {
   player.removeAllListeners("end");
   player.removeAllListeners("exception");
   player.removeAllListeners("stuck");
+  player.removeAllListeners("error");
+
+  // Without an "error" listener, Node.js throws any emitted errors as uncaught
+  // exceptions and crashes the process — this is the root cause of the 10 s crash.
+  player.on("error", (err: any) => {
+    log(`[Music] Player error in guild ${guildId}: ${err?.message ?? String(err)}`, "discord");
+    const q = queues.get(guildId);
+    if (!q || q.isStopped || q.isRecovering) return;
+    void attemptRecovery(player, guildId, "exception", `player error: ${err?.message ?? "unknown"}`);
+  });
 
   player.on("start", () => {
     const q = queues.get(guildId);
@@ -1201,13 +1189,10 @@ export async function searchTracks(query: string, limit = 5): Promise<SearchResu
   return [];
 }
 
-// Primary search sources — both are YouTube-based and return canonical results.
-// SoundCloud is intentionally excluded from the parallel race: it surfaces
-// unofficial phonk remixes, mashups and fan covers with the same artist name,
-// causing them to score equally against the original and win on speed.
-// scsearch is retained as a sequential last-resort in resolveSearch /
-// resolveSearchMultiple for when both YouTube sources come up empty.
-const SEARCH_PREFIXES = ["ytsearch", "ytmsearch"];
+// Primary search source — ytsearch is the most portable and widely-supported
+// Lavalink search prefix. ytmsearch (YouTube Music) and scsearch (SoundCloud)
+// are sequential last-resorts when ytsearch returns nothing.
+const SEARCH_PREFIXES = ["ytsearch"];
 
 // Tracks whose titles match this are clearly not the original version the user
 // wants (unless they explicitly typed one of these words in the query).
@@ -1371,8 +1356,17 @@ async function resolveSearch(node: any, query: string): Promise<any | null> {
 
   if (ytResult) return ytResult;
 
-  // Last resort: SoundCloud. Only reached when both ytsearch and ytmsearch
-  // returned nothing (e.g. a very obscure track or YouTube region-block).
+  // Second attempt: YouTube Music. Only reached when ytsearch returned nothing.
+  try {
+    const ytm = await resolveWithTimeout(node, `ytmsearch:${query}`);
+    if (ytm?.loadType === "search") {
+      const tracks = (ytm.data as any[]).filter((t: any) => !isBadTrack(t));
+      if (tracks.length) return bestMatchingTrack(query, tracks.slice(0, 5));
+    }
+  } catch { /* ytmsearch also empty */ }
+
+  // Last resort: SoundCloud. Only reached when both YouTube sources returned
+  // nothing (e.g. a very obscure track or YouTube region-block).
   try {
     const sc = await resolveWithTimeout(node, `scsearch:${query}`);
     if (sc?.loadType === "search") {
@@ -1401,7 +1395,16 @@ async function resolveSearchMultiple(node: any, query: string, limit: number): P
 
   try {
     return await Promise.any(searches);
-  } catch { /* all YouTube sources came up empty */ }
+  } catch { /* ytsearch came up empty — try ytmsearch next */ }
+
+  // Second attempt: YouTube Music (reached when ytsearch returned nothing).
+  try {
+    const ytm = await resolveWithTimeout(node, `ytmsearch:${query}`);
+    if (ytm?.loadType === "search") {
+      const tracks = (ytm.data as any[]).filter(t => !isBadTrack(t));
+      if (tracks.length) return tracks.slice(0, limit);
+    }
+  } catch { /* ytmsearch also empty */ }
 
   // Last resort: SoundCloud (only reached when both YouTube sources returned nothing).
   try {

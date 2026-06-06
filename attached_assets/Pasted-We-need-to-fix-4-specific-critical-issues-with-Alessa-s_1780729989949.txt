@@ -1,0 +1,27 @@
+We need to fix 4 specific, critical issues with Alessa's audio architecture and command structure. Stop guessing and systematically refactor the codebase according to these exact guidelines:
+
+1. FIX THE 10-SECOND CRASH AND LEAVE ISSUE
+- Symptoms: The bot joins a voice channel, successfully plays audio for roughly 10 seconds, crashes the Node.js process, and disconnects.
+- Root Cause to Fix: This is a textbook unhandled exception or WebSocket drop event coming from the Shoukaku player client or a Lavalink node drop.
+- Action: Wrap the entire audio play/track-start event loop inside robust try/catch blocks. Ensure there are active event listeners attached to the Shoukaku player instance for 'error', 'exception', 'closed', and 'disconnected'. If a track throws an exception, catch it gracefully, log the exact stack trace to the console, send a message to the Discord channel, and clear the queue safely instead of letting the entire Node process crash.
+
+2. FIX /PLAY QUEUE FAILURE & ENFORCE YOUTUBE SEARCH SOURCES
+- Symptoms: /play fails half the time, and when it works, it pulls low-quality audio sources instead of high-fidelity tracks.
+- Action: Update the search query logic inside your Shoukaku/Lavalink track loader. Explicitly prepend the search prefix to enforce YouTube searching. Modify the loadType resolution so that if a raw URL isn't provided, it defaults strictly to a YouTube search identifier:
+  * For Lavalink v4 / Shoukaku, ensure search queries utilize the `ytsearch:${query}` format instead of generic lookups. 
+  * Validate that the search response parsing cleanly handles `playlist`, `track`, and `search` result types without falling back to broken alternative fallback platforms.
+
+
+3. REFACTOR /SPEAK (TTS) COMMAND BEHAVIOR
+- Target Behavior: The /speak command must no longer accept a text query parameter. It needs to function as an ambient listener.
+- Action: Change the slash command definition for `/speak` to remove the string option/input parameter.
+- Refactor the command execution logic to match this flow:
+  1. Check if the user executing the command is currently connected to a Voice Channel (VC). If not, reply with an error.
+  2. Make the bot join that specific VC.
+  3. Set up a text listener: Whenever that specific user types ANY text message inside the exact text channel where the `/speak` command was originally initiated, the bot must intercept that text string and instantly stream it as speech into the VC using the StreamElements Brian TTS endpoint via Lavalink.
+  4. Ensure this text-to-speech loop remains active as long as the user stays inside the VC, or until a `/stop` / `/disconnect` command is invoked.
+
+
+4. Make it only use public nodes. we are no more using our own hosted lavalink node.
+
+Review the modified files carefully before building. Ensure all TypeScript/JavaScript types line up correctly with Discord.js v14 and Shoukaku v4 specifications. Run `npm run build` once complete to verify no compilation errors exist.

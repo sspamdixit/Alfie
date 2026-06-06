@@ -96,6 +96,12 @@ let client: Client | null = null;
 let loginRetryTimer: NodeJS.Timeout | null = null;
 const backgroundTimers = new Set<NodeJS.Timeout>();
 
+// ── Ambient TTS sessions ───────────────────────────────────────────────────────
+// Key: guildId — value: the user + channel pair currently being listened to.
+// When active, every message the user sends in textChannelId is spoken via TTS.
+interface TTSSession { userId: string; voiceChannelId: string; textChannelId: string; }
+const activeTTSSessions = new Map<string, TTSSession>();
+
 // ── Track history ─────────────────────────────────────────────────────────────
 const HISTORY_LIMIT = 20;
 const trackHistory = new Map<string, Array<{
@@ -580,8 +586,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName("ravestop").setDescription("stop the current rave session"),
   new SlashCommandBuilder()
     .setName("speak")
-    .setDescription("say something in the voice channel via TTS")
-    .addStringOption((o) => o.setName("text").setDescription("text to speak").setRequired(true)),
+    .setDescription("start an ambient TTS session — everything you type in this channel gets spoken aloud"),
   // ── Audio effects ────────────────────────────────────────────────────────────
   new SlashCommandBuilder()
     .setName("bassboost")
@@ -649,14 +654,15 @@ export async function startAlessa(): Promise<void> {
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildVoiceStates,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
     ],
 
     // ── Render free-tier memory optimisation ────────────────────────────────
-    // We only request Guilds + GuildVoiceStates intents, so Discord.js will
-    // never populate messages, presences, emojis, stickers, bans, reactions or
-    // threads.  Leaving their managers at the default limit (200) wastes RAM.
-    // A smaller heap → less GC pressure → heartbeats fire on time → no shard
-    // disconnects → no music drops.
+    // GuildMessages + MessageContent are added only for the ambient /speak TTS
+    // feature. All other caches are tightly limited to keep heap small:
+    // less GC pressure → heartbeats fire on time → no shard disconnects → no
+    // music drops.
     makeCache: Options.cacheWithLimits({
       MessageManager: 0,              // no MessageContent intent — nothing arrives
       GuildMemberManager: 200,        // keep recent members for voice-channel checks
@@ -1205,6 +1211,7 @@ export async function startAlessa(): Promise<void> {
     if (commandName === "stop") {
       try {
         onDjStop(guildId);
+        activeTTSSessions.delete(guildId);
         const stopped = await stopMusic(guildId);
         await interaction.reply({ content: stopped ? "stopped~! see you soon ♡" : "i wasn't even playing anything~ ehehe", allowedMentions: { parse: [] } });
       } catch (err: any) {
@@ -1215,6 +1222,7 @@ export async function startAlessa(): Promise<void> {
 
     if (commandName === "disconnect") {
       try {
+        activeTTSSessions.delete(guildId);
         const done = await disconnectMusic(guildId);
         await interaction.reply({ content: done ? "disconnected~! byebye ♡" : "i'm not even in a voice channel~ hehe", allowedMentions: { parse: [] } });
       } catch (err: any) {
@@ -1511,21 +1519,40 @@ export async function startAlessa(): Promise<void> {
     }
 
     if (commandName === "speak") {
-      const text = interaction.options.getString("text", true).trim();
       const member = interaction.guild?.members.cache.get(interaction.user.id);
       const voiceChannel = member?.voice?.channel;
       if (!voiceChannel) { await replyEph("join a voice channel first~ ehehe"); return; }
-      await interaction.deferReply();
+
+      // Toggle: running the command again stops the session
+      const existing = activeTTSSessions.get(guildId);
+      if (existing && existing.userId === interaction.user.id) {
+        activeTTSSessions.delete(guildId);
+        await interaction.reply({ content: "tts session ended~ back to silence ♡", allowedMentions: { parse: [] } });
+        return;
+      }
+
+      // Join the voice channel and start the session
       try {
-        const result = await speakInVoice(guildId, text, voiceChannel.id, interaction.channelId, interaction.guild?.shardId ?? 0, interaction.user.username);
-        if (result.ok) {
-          await interaction.editReply({ content: `🔊 speaking~: *"${text.slice(0, 100)}${text.length > 100 ? "…" : ""}"* ♡`, allowedMentions: { parse: [] } });
-        } else {
-          await interaction.editReply({ content: `oopsie, couldn't speak~ ${result.reason ?? "unknown error"}`, allowedMentions: { parse: [] } });
+        const joinResult = await speakInVoice(guildId, "ready~", voiceChannel.id, interaction.channelId, interaction.guild?.shardId ?? 0, interaction.user.username);
+        if (!joinResult.ok) {
+          await replyEph(`couldn't join your voice channel~ ${joinResult.reason ?? "unknown error"}`);
+          return;
         }
       } catch (err: any) {
-        await interaction.editReply({ content: `tts went oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
+        await replyEph(`couldn't join your voice channel~ ${err.message}`);
+        return;
       }
+
+      activeTTSSessions.set(guildId, {
+        userId: interaction.user.id,
+        voiceChannelId: voiceChannel.id,
+        textChannelId: interaction.channelId,
+      });
+
+      await interaction.reply({
+        content: `🔊 ambient TTS on~! type anything in this channel and i'll say it ♡\nrun \`/speak\` again to stop.`,
+        allowedMentions: { parse: [] },
+      });
       return;
     }
 
@@ -1770,6 +1797,14 @@ export async function startAlessa(): Promise<void> {
       return;
     }
 
+    // If the TTS session owner left their voice channel, end the session
+    const ttsSession = activeTTSSessions.get(guildId);
+    if (ttsSession && oldState.id === ttsSession.userId && leftChannelId === ttsSession.voiceChannelId) {
+      activeTTSSessions.delete(guildId);
+      const ttsNotifCh = client?.channels.cache.get(ttsSession.textChannelId) as TextChannel | null;
+      ttsNotifCh?.send({ content: "you left the vc~ ending tts session ♡", allowedMentions: { parse: [] } }).catch(() => {});
+    }
+
     if (leftChannelId === queue.voiceChannelId) {
       const guild = oldState.guild;
       const channel = guild.channels.cache.get(leftChannelId);
@@ -1802,6 +1837,26 @@ export async function startAlessa(): Promise<void> {
       }, 2 * 60 * 1000);
       timer.unref?.();
       aloneDisconnectTimers.set(guildId, timer);
+    }
+  });
+
+  // ── Ambient TTS listener ────────────────────────────────────────────────────
+  // For every message in a guild that has an active TTS session, speak the text
+  // if the author matches the session owner and the channel matches.
+  client.on("messageCreate", async (msg) => {
+    if (msg.author.bot || !msg.guildId) return;
+    const session = activeTTSSessions.get(msg.guildId);
+    if (!session) return;
+    if (msg.author.id !== session.userId) return;
+    if (msg.channelId !== session.textChannelId) return;
+
+    const text = msg.content.trim();
+    if (!text) return;
+
+    try {
+      await speakInVoice(msg.guildId, text, session.voiceChannelId, session.textChannelId, msg.guild?.shardId ?? 0, msg.author.username);
+    } catch (err: any) {
+      log(`[TTS] ambient speak error in guild ${msg.guildId}: ${err.message}`, "discord");
     }
   });
 

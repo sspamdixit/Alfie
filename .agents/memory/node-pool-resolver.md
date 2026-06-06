@@ -19,10 +19,8 @@ Nodes are sourced entirely from environment variables — no credentials live in
 
 | Env var | Purpose |
 |---------|---------|
-| `LAVALINK_URL` | Host:port of the primary node |
-| `LAVALINK_PASSWORD` or `LAVALINK_AUTH` | Password for the primary node |
-| `LAVALINK_SECURE` | `true` for WSS, omit/`false` for WS |
-| `LAVALINK_NODES` | JSON array for additional nodes (see format below) |
+| `LAVALINK_NODES` | JSON array of public/community nodes — **only source used** |
+| `LAVALINK_URL` | **Ignored** — private node support removed; only `LAVALINK_NODES` is read |
 
 ### `LAVALINK_NODES` format
 ```json
@@ -40,4 +38,5 @@ Public community Lavalink node lists (updated regularly):
 
 - Nodes with no stats yet (still connecting) are deprioritized to the non-stats pool but still eligible.
 - `recentlyClosedNodes` map applies a 20 s cooldown penalty after an abnormal close.
-- No hardcoded fallback pool exists — if no env vars are set, music is unavailable and a log message explains why.
+- No hardcoded fallback pool — if `LAVALINK_NODES` is unset, music is unavailable and a log explains why.
+- `LAVALINK_URL` is no longer read by `getLavalinkNodes()` — private self-hosted node support removed.
