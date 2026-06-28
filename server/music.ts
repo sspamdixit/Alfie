@@ -128,35 +128,14 @@ function getLavalinkNodes(): LavalinkNodeConfig[] {
         log(`[Music] Using ${nodes.length} node(s) from LAVALINK_NODES override: ${nodes.map(n => n.name).join(", ")}`, "discord");
         return nodes;
       }
-      log("[Music] LAVALINK_NODES was set but contained no valid nodes — falling back to LAVALINK_URL / public pool.", "discord");
+      log("[Music] LAVALINK_NODES was set but contained no valid nodes — falling back to public pool.", "discord");
     } catch (err: any) {
-      log(`[Music] Could not parse LAVALINK_NODES JSON: ${err.message} — falling back to LAVALINK_URL / public pool.`, "discord");
+      log(`[Music] Could not parse LAVALINK_NODES JSON: ${err.message} — falling back to public pool.`, "discord");
     }
-  }
-
-  // ── LAVALINK_URL single-node configuration ────────────────────────────────
-  // Supports LAVALINK_URL, LAVALINK_PASSWORD (or LAVALINK_AUTH), LAVALINK_SECURE.
-  // When set, this node is prepended to the public pool so it is always tried
-  // first (it wins the quality resolver if healthy), with public nodes as backup.
-  const lavalinkUrl = process.env.LAVALINK_URL?.trim();
-  const lavalinkAuth = (process.env.LAVALINK_PASSWORD ?? process.env.LAVALINK_AUTH ?? "").trim();
-  const lavalinkSecure = parseBoolean(process.env.LAVALINK_SECURE);
-
-  if (lavalinkUrl && lavalinkAuth) {
-    const localNode = normalizeLavalinkNode(
-      { name: LOCAL_NODE_NAME, url: lavalinkUrl, auth: lavalinkAuth, secure: lavalinkSecure },
-      LOCAL_NODE_NAME,
-    );
-    if (localNode) {
-      log(`[Music] Using LAVALINK_URL node "${localNode.url}" + ${PUBLIC_NODE_POOL.length} public community nodes as backup.`, "discord");
-      return [localNode, ...PUBLIC_NODE_POOL];
-    }
-  } else if (lavalinkUrl) {
-    log("[Music] LAVALINK_URL is set but LAVALINK_PASSWORD/LAVALINK_AUTH is missing — skipping local node.", "discord");
   }
 
   // ── Default: built-in public community node pool ─────────────────────────
-  log(`[Music] Using ${PUBLIC_NODE_POOL.length} built-in public community nodes. Set LAVALINK_URL+LAVALINK_PASSWORD or LAVALINK_NODES to configure.`, "discord");
+  log(`[Music] Using ${PUBLIC_NODE_POOL.length} built-in public community nodes. Set LAVALINK_NODES to override.`, "discord");
   return [...PUBLIC_NODE_POOL];
 }
 
@@ -269,6 +248,8 @@ const NODE_PENALTY_IMPROVEMENT_THRESHOLD = 30;       // require alternative to b
 const NODE_FRAME_DEFICIT_THRESHOLD = 100;            // dropped+nulled opus frames per stats window
 
 let shoukaku: Shoukaku | null = null;
+let _musicClient: Client | null = null; // retained for pool-guardian re-init
+let _poolGuardianTimer: ReturnType<typeof setInterval> | null = null;
 const queues = new Map<string, GuildQueue>();
 const joiningGuilds = new Set<string>();
 
@@ -323,6 +304,7 @@ export function setQueueStopCallback(cb: QueueStopCallbackFn): void {
 }
 
 export function initMusic(client: Client): void {
+  _musicClient = client;
   const nodes = getLavalinkNodes();
 
   if (!nodes.length) {
@@ -336,8 +318,12 @@ export function initMusic(client: Client): void {
   shoukaku = new Shoukaku(new Connectors.DiscordJS(client), nodes, {
     moveOnDisconnect: false,
     resumeByLibrary: false,
-    reconnectTries: 5,
-    reconnectInterval: 5,
+    // High reconnectTries prevents Shoukaku from permanently evicting nodes after a
+    // brief outage. With 5 tries the entire 14-node public pool can be exhausted in
+    // minutes, leaving an empty node map and making every search throw
+    // "No Lavalink nodes available." — keeping tries high means nodes keep retrying.
+    reconnectTries: 999,
+    reconnectInterval: 10,
     nodeResolver: qualityNodeResolver,
   });
 
@@ -362,6 +348,26 @@ export function initMusic(client: Client): void {
   });
 
   startNodeHealthWatchdog();
+  startPoolGuardian();
+}
+
+// Pool guardian — runs every 90 s and re-initialises Shoukaku if all nodes have
+// been dropped from the pool. With reconnectTries: 999 this should almost never
+// trigger, but it is the final safety net that prevents a permanently-empty pool.
+function startPoolGuardian(): void {
+  if (_poolGuardianTimer) clearInterval(_poolGuardianTimer);
+  _poolGuardianTimer = setInterval(() => {
+    if (!shoukaku || !_musicClient) return;
+    const nodeCount = (shoukaku.nodes as Map<string, any>).size;
+    if (nodeCount === 0) {
+      log("[Music] Pool guardian: all nodes dropped — re-initialising Shoukaku.", "discord");
+      // Destroy the dead instance and start fresh.
+      try { shoukaku.removeAllListeners(); } catch { /* ignore */ }
+      shoukaku = null;
+      initMusic(_musicClient);
+    }
+  }, 90_000);
+  _poolGuardianTimer.unref?.();
 }
 
 // Node-health watchdog
@@ -1305,7 +1311,12 @@ export function acCacheLookup(key: string, idx: number): { uri: string; text: st
 export async function searchTracks(query: string, limit = 5): Promise<SearchResult[]> {
   if (!shoukaku) return [];
 
-  const node = shoukaku.getIdealNode();
+  // Use getNodesByQuality() (same as resolveTrack) so that nodes which are
+  // registered but not yet connected don't cause an immediate [] return.
+  // getIdealNode() only returns CONNECTED nodes — if all nodes are still
+  // establishing their WebSocket, it returns null and autocomplete shows nothing.
+  const nodes = getNodesByQuality();
+  const node = nodes[0] ?? shoukaku.getIdealNode();
   if (!node) return [];
 
   const isUrl = /^https?:\/\//i.test(query);

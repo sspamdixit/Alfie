@@ -1,42 +1,45 @@
 ---
 name: Node pool & resolver
-description: How Lavalink nodes are configured and selected at runtime.
+description: How Lavalink nodes are configured, selected, and kept alive at runtime.
 ---
 
-## Node resolver redesign
+## Node resolver
 
-**Old:** `localFirstNodeResolver` — always picked the local node if connected, regardless of its load.
+`qualityNodeResolver` — all nodes compete equally on Shoukaku penalty score (CPU/memory/players). Nodes that closed abnormally within a 20 s cooldown window receive +1000 penalty so they are tried last.
 
-**New:** `qualityNodeResolver` — all nodes compete equally on Shoukaku penalty score (CPU/memory/players). Cooling penalty (+1000 pts) applied to nodes that closed within the 20 s cooldown window.
-
-**Why:** The local node on Render was auto-selected even when overloaded, blocking better nodes. Now the resolver naturally selects the least-loaded node.
-
-**How to apply:** `qualityNodeResolver` is passed as `nodeResolver` in the Shoukaku constructor. `getNodesByQuality()` (same ranking logic) is used in `resolveSearchAnyNode`, `resolveSearchMultipleAnyNode`, and the `resolveTrack` URL fallback.
+`getNodesByQuality()` (same ranking logic) is used inside `resolveSearchAnyNode`, `resolveSearchMultipleAnyNode`, `resolveTrack`, and `searchTracks` so the selection is always consistent.
 
 ## Node configuration
 
-Nodes are sourced entirely from environment variables — no credentials live in source:
-
 | Env var | Purpose |
 |---------|---------|
-| `LAVALINK_NODES` | JSON array of public/community nodes — **only source used** |
-| `LAVALINK_URL` | **Ignored** — private node support removed; only `LAVALINK_NODES` is read |
+| `LAVALINK_NODES` | JSON array — overrides the built-in public pool entirely |
+| `LAVALINK_URL` | **Ignored** — single-URL support was removed; use `LAVALINK_NODES` |
+
+If neither is set, the 14-entry `PUBLIC_NODE_POOL` constant in `server/music.ts` is used automatically.
 
 ### `LAVALINK_NODES` format
 ```json
 [
-  { "name": "node-1", "url": "host:port", "auth": "password", "secure": true },
-  { "name": "node-2", "url": "host:port", "auth": "password", "secure": false }
+  { "name": "node-1", "url": "host:port", "auth": "password", "secure": true }
 ]
 ```
 
-Public community Lavalink node lists (updated regularly):
-- https://lavalink.darrennathanael.com
-- https://nodes.lavalink.rf.gd
+## Reconnect / pool stability
 
-## Key notes
+**Why:** With `reconnectTries: 5` the entire 14-node public pool could be permanently evicted in minutes (5 tries × ~10 s apart = ~50 s per node). Once `shoukaku.nodes` is empty, every search throws "No Lavalink nodes available." — "music went boom".
 
-- Nodes with no stats yet (still connecting) are deprioritized to the non-stats pool but still eligible.
-- `recentlyClosedNodes` map applies a 20 s cooldown penalty after an abnormal close.
-- No hardcoded fallback pool — if `LAVALINK_NODES` is unset, music is unavailable and a log explains why.
-- `LAVALINK_URL` is no longer read by `getLavalinkNodes()` — private self-hosted node support removed.
+**Fix applied:**
+- `reconnectTries: 999` — nodes retry for hours before being evicted.
+- `reconnectInterval: 10` (seconds between retries).
+- Pool guardian runs every 90 s: if `shoukaku.nodes.size === 0`, it removes all listeners and calls `initMusic` again to bootstrap a fresh Shoukaku instance. `_musicClient` is retained for this re-init.
+
+## searchTracks consistency fix
+
+`searchTracks` previously called `shoukaku.getIdealNode()` which only returns **connected** nodes. During startup or after an outage, all nodes may be registered but not yet connected, making `getIdealNode()` return null and autocomplete show zero results.
+
+**Fix:** `searchTracks` now uses `getNodesByQuality()` (same as `resolveTrack`) with `shoukaku.getIdealNode()` as fallback. This keeps both code paths consistent.
+
+## Key rule
+
+> Any code path that picks a node for search or playback must use `getNodesByQuality()` (not `shoukaku.getIdealNode()` alone) so unconnected-but-registered nodes are still reachable and the selection logic matches the resolver.
