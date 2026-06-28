@@ -128,14 +128,35 @@ function getLavalinkNodes(): LavalinkNodeConfig[] {
         log(`[Music] Using ${nodes.length} node(s) from LAVALINK_NODES override: ${nodes.map(n => n.name).join(", ")}`, "discord");
         return nodes;
       }
-      log("[Music] LAVALINK_NODES was set but contained no valid nodes — falling back to public pool.", "discord");
+      log("[Music] LAVALINK_NODES was set but contained no valid nodes — falling back to LAVALINK_URL / public pool.", "discord");
     } catch (err: any) {
-      log(`[Music] Could not parse LAVALINK_NODES JSON: ${err.message} — falling back to public pool.`, "discord");
+      log(`[Music] Could not parse LAVALINK_NODES JSON: ${err.message} — falling back to LAVALINK_URL / public pool.`, "discord");
     }
   }
 
+  // ── LAVALINK_URL single-node configuration ────────────────────────────────
+  // Supports LAVALINK_URL, LAVALINK_PASSWORD (or LAVALINK_AUTH), LAVALINK_SECURE.
+  // When set, this node is prepended to the public pool so it is always tried
+  // first (it wins the quality resolver if healthy), with public nodes as backup.
+  const lavalinkUrl = process.env.LAVALINK_URL?.trim();
+  const lavalinkAuth = (process.env.LAVALINK_PASSWORD ?? process.env.LAVALINK_AUTH ?? "").trim();
+  const lavalinkSecure = parseBoolean(process.env.LAVALINK_SECURE);
+
+  if (lavalinkUrl && lavalinkAuth) {
+    const localNode = normalizeLavalinkNode(
+      { name: LOCAL_NODE_NAME, url: lavalinkUrl, auth: lavalinkAuth, secure: lavalinkSecure },
+      LOCAL_NODE_NAME,
+    );
+    if (localNode) {
+      log(`[Music] Using LAVALINK_URL node "${localNode.url}" + ${PUBLIC_NODE_POOL.length} public community nodes as backup.`, "discord");
+      return [localNode, ...PUBLIC_NODE_POOL];
+    }
+  } else if (lavalinkUrl) {
+    log("[Music] LAVALINK_URL is set but LAVALINK_PASSWORD/LAVALINK_AUTH is missing — skipping local node.", "discord");
+  }
+
   // ── Default: built-in public community node pool ─────────────────────────
-  log(`[Music] Using ${PUBLIC_NODE_POOL.length} built-in public community nodes. Set LAVALINK_NODES to override.`, "discord");
+  log(`[Music] Using ${PUBLIC_NODE_POOL.length} built-in public community nodes. Set LAVALINK_URL+LAVALINK_PASSWORD or LAVALINK_NODES to configure.`, "discord");
   return [...PUBLIC_NODE_POOL];
 }
 
