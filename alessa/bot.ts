@@ -37,6 +37,7 @@ import {
   setMusicVolume,
   shuffleQueue,
   cycleLoop,
+  setLoop,
   removeTrack,
   moveTrack,
   clearQueue,
@@ -52,6 +53,10 @@ import {
   removeDuplicates,
   replayTrack,
   setQueueStopCallback,
+  setCrossfadeSeconds,
+  getCrossfadeSeconds,
+  setCustomEqBand,
+  fetchSpotifyPlaylistTracks,
   type QueueTrack,
   type GuildQueue,
   type FilterPreset,
@@ -179,6 +184,26 @@ function markGuildStopped(guildId: string): void {
 // ── DJ role & 24/7 mode ───────────────────────────────────────────────────────
 const djRoles = new Map<string, string>();   // guildId → roleId
 const guilds247 = new Set<string>();         // guildIds with 24/7 mode enabled
+
+// ── Sleep timers ──────────────────────────────────────────────────────────────
+interface SleepTimer { timer: ReturnType<typeof setTimeout>; endsAt: number }
+const sleepTimers = new Map<string, SleepTimer>();
+
+// ── Request channels (song request via plain message) ─────────────────────────
+const requestChannels = new Map<string, string>(); // guildId → channelId
+
+// ── Jukebox sessions ──────────────────────────────────────────────────────────
+interface JukeboxSession {
+  options: QueueTrack[];
+  votes: Map<string, number>;     // userId → option index
+  voteCounts: number[];
+  messageId: string;
+  channelId: string;
+  guildId: string;
+  voiceChannelId: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+const jukeboxSessions = new Map<string, JukeboxSession>();
 
 function checkDjPermission(interaction: any, guildId: string): boolean {
   const roleId = djRoles.get(guildId);
@@ -635,6 +660,37 @@ const SLASH_COMMANDS = [
       .addRoleOption((o) => o.setName("role").setDescription("the role to use as the DJ role").setRequired(true)))
     .addSubcommand((s) => s.setName("clear").setDescription("remove the DJ role restriction — anyone can control music"))
     .addSubcommand((s) => s.setName("show").setDescription("show the current DJ role")),
+  // ── Premium features (free) ───────────────────────────────────────────────────
+  new SlashCommandBuilder()
+    .setName("sleep")
+    .setDescription("set a sleep timer — Alessa stops playing after N minutes (0 to cancel)")
+    .addIntegerOption((o) => o.setName("minutes").setDescription("minutes until stop (0 = cancel)").setRequired(true).setMinValue(0).setMaxValue(480)),
+  new SlashCommandBuilder()
+    .setName("requestchannel")
+    .setDescription("set or clear the song-request channel")
+    .addSubcommand((s) =>
+      s.setName("set").setDescription("set a channel where users can type track names/URLs to queue them")
+        .addChannelOption((o) => o.setName("channel").setDescription("the text channel to use").setRequired(true)))
+    .addSubcommand((s) => s.setName("off").setDescription("disable the song-request channel")),
+  new SlashCommandBuilder()
+    .setName("eq")
+    .setDescription("adjust a single equalizer band (15 bands, 0–14)")
+    .addIntegerOption((o) => o.setName("band").setDescription("EQ band 0–14 (0=63Hz … 14=16kHz)").setRequired(true).setMinValue(0).setMaxValue(14))
+    .addNumberOption((o) => o.setName("gain").setDescription("gain –0.25 (cut) to 1.0 (boost)").setRequired(true).setMinValue(-0.25).setMaxValue(1.0)),
+  new SlashCommandBuilder()
+    .setName("crossfade")
+    .setDescription("set crossfade duration between tracks")
+    .addIntegerOption((o) => o.setName("seconds").setDescription("crossfade seconds (0 = off, max 10)").setRequired(true).setMinValue(0).setMaxValue(10)),
+  new SlashCommandBuilder()
+    .setName("stats")
+    .setDescription("show listening statistics")
+    .addSubcommand((s) => s.setName("server").setDescription("top tracks for this server"))
+    .addSubcommand((s) => s.setName("global").setDescription("global all-time play counts")),
+  new SlashCommandBuilder()
+    .setName("jukebox")
+    .setDescription("vote queue mode — search and let the VC vote on what plays next")
+    .addStringOption((o) =>
+      o.setName("query").setDescription("what to search for").setRequired(true).setAutocomplete(true)),
 ];
 
 // ── Bot startup ───────────────────────────────────────────────────────────────
@@ -655,6 +711,8 @@ export async function startAlessa(): Promise<void> {
   // Intents).  Only request them when ENABLE_TTS=true so the bot can always
   // come online even if the operator hasn't toggled the intent yet.
   const ttsEnabled = process.env.ENABLE_TTS === "true";
+  const requestChannelEnabled = process.env.ENABLE_REQUEST_CHANNEL === "true";
+  const needsMsgIntents = ttsEnabled || requestChannelEnabled;
   if (!ttsEnabled) {
     log("[Alessa] ENABLE_TTS not set — /speak TTS disabled. Set ENABLE_TTS=true and enable Message Content Intent in Discord portal to activate it.", "alessa");
   }
@@ -663,7 +721,7 @@ export async function startAlessa(): Promise<void> {
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildVoiceStates,
-      ...(ttsEnabled
+      ...(needsMsgIntents
         ? [GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
         : []),
     ],
@@ -722,6 +780,18 @@ export async function startAlessa(): Promise<void> {
     setRaveClient(readyClient);
     initMusic(readyClient);
     setTTSClient(readyClient);
+
+    // Load persistent guild settings (request channels, crossfade)
+    try {
+      const allSettings = await storage.getAllGuildSettings();
+      for (const s of allSettings) {
+        if (s.requestChannelId) requestChannels.set(s.guildId, s.requestChannelId);
+        if (s.crossfadeSeconds != null) setCrossfadeSeconds(s.guildId, s.crossfadeSeconds);
+      }
+      log(`[Alessa] Loaded settings for ${allSettings.length} guild(s)`, "alessa");
+    } catch (e: any) {
+      log(`[Alessa] Could not load guild settings from DB: ${e.message}`, "alessa");
+    }
 
     setNowPlayingCallback((guildId, track, queue) => {
       const session = djSessions.get(guildId);

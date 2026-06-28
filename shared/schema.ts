@@ -47,3 +47,25 @@ export const playlistTracks = pgTable("playlist_tracks", {
 });
 
 export type PlaylistTrack = typeof playlistTracks.$inferSelect;
+
+// ── Listening stats ───────────────────────────────────────────────────────────
+export const songPlays = pgTable("song_plays", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").notNull(),
+  uri: text("uri").notNull(),
+  title: text("title").notNull(),
+  author: text("author").notNull(),
+  requestedBy: text("requested_by").notNull(),
+  playedAt: timestamp("played_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type SongPlay = typeof songPlays.$inferSelect;
+
+// ── Per-guild feature settings ────────────────────────────────────────────────
+export const guildSettings = pgTable("guild_settings", {
+  guildId: text("guild_id").primaryKey(),
+  requestChannelId: text("request_channel_id"),
+  crossfadeSeconds: integer("crossfade_seconds").notNull().default(0),
+});
+
+export type GuildSettingsRow = typeof guildSettings.$inferSelect;

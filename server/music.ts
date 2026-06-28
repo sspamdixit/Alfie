@@ -185,6 +185,43 @@ export interface GuildQueue {
 export type FilterPreset = "bassboost" | "nightcore" | "vaporwave" | "8d" | "karaoke" | "off";
 const guildFilters = new Map<string, FilterPreset>();
 
+// ── Crossfade ─────────────────────────────────────────────────────────────────
+const guildCrossfadeSeconds = new Map<string, number>(); // guildId → seconds (0 = off)
+
+export function setCrossfadeSeconds(guildId: string, seconds: number): void {
+  if (seconds <= 0) guildCrossfadeSeconds.delete(guildId);
+  else guildCrossfadeSeconds.set(guildId, Math.min(seconds, 10));
+}
+
+export function getCrossfadeSeconds(guildId: string): number {
+  return guildCrossfadeSeconds.get(guildId) ?? 0;
+}
+
+// Fade volume in from 0 → target over crossfade_seconds.  Called right after a
+// new track starts so each transition feels smooth.  Non-blocking — uses a
+// setInterval in background and stops when the track changes.
+function applyCrossfadeVolume(player: Player, guildId: string, targetVolume: number): void {
+  const cfSecs = guildCrossfadeSeconds.get(guildId) ?? 0;
+  if (cfSecs <= 0) {
+    player.setGlobalVolume(targetVolume).catch(() => {});
+    return;
+  }
+  player.setGlobalVolume(0).catch(() => {});
+  const startEncoded = queues.get(guildId)?.current?.encoded;
+  const steps = Math.max(10, cfSecs * 10);
+  const stepMs = Math.floor((cfSecs * 1000) / steps);
+  let step = 0;
+  const timer = setInterval(async () => {
+    step++;
+    const liveQ = queues.get(guildId);
+    if (!liveQ || liveQ.current?.encoded !== startEncoded) { clearInterval(timer); return; }
+    const vol = Math.min(targetVolume, Math.round((targetVolume * step) / steps));
+    try { await player.setGlobalVolume(vol); } catch { clearInterval(timer); }
+    if (step >= steps) clearInterval(timer);
+  }, stepMs);
+  (timer as any).unref?.();
+}
+
 async function applyFilterPreset(player: Player, preset: FilterPreset, guildId: string): Promise<void> {
   try {
     await player.clearFilters();
@@ -1019,7 +1056,7 @@ async function advanceQueue(player: Player, guildId: string): Promise<void> {
         await resetPlayerFilters(player, guildId);
         await player.playTrack({ track: { encoded: next.encoded } });
         q.current = next;
-        await player.setGlobalVolume(q.volume);
+        applyCrossfadeVolume(player, guildId, q.volume);
         await applyResumePosition(player, guildId, next, q);
         nowPlayingCallback?.(guildId, next, q);
         return; // Successfully started next track
@@ -1036,7 +1073,7 @@ async function advanceQueue(player: Player, guildId: string): Promise<void> {
               await player.playTrack({ track: { encoded: fresh.encoded } });
               const reResolved = { ...next, encoded: fresh.encoded };
               q.current = reResolved;
-              await player.setGlobalVolume(q.volume);
+              applyCrossfadeVolume(player, guildId, q.volume);
               await applyResumePosition(player, guildId, reResolved, q);
               nowPlayingCallback?.(guildId, reResolved, q);
               log(`[Music] Re-resolved and now playing "${next.title}" in guild ${guildId}.`, "discord");
@@ -2331,4 +2368,129 @@ export async function resolveSearchResults(
 
 export function getIdealLavalinkNode(): any | null {
   return shoukaku?.getIdealNode() ?? null;
+}
+
+// ── getMusicStatus ─────────────────────────────────────────────────────────────
+// Returns a snapshot of every active guild queue — used by the web controller.
+export interface MusicStatusEntry {
+  guildId: string;
+  current: QueueTrack | null;
+  queueLength: number;
+  volume: number;
+  paused: boolean;
+  loop: LoopMode;
+  autoplay: boolean;
+  voiceChannelId: string;
+  textChannelId: string;
+  position: number;
+}
+
+export function getMusicStatus(): MusicStatusEntry[] {
+  return [...queues.entries()].map(([guildId, q]) => ({
+    guildId,
+    current: q.current,
+    queueLength: q.tracks.length,
+    volume: q.volume,
+    paused: q.player.paused,
+    loop: q.loop,
+    autoplay: q.autoplay,
+    voiceChannelId: q.voiceChannelId,
+    textChannelId: q.textChannelId,
+    position: Number(q.player.position ?? 0),
+  }));
+}
+
+// ── Custom EQ ─────────────────────────────────────────────────────────────────
+// Sets a single band on the Lavalink equalizer without clearing other filters.
+export async function setCustomEqBand(guildId: string, band: number, gain: number): Promise<boolean> {
+  const q = queues.get(guildId);
+  if (!q) return false;
+  try {
+    await q.player.setEqualizer([{ band, gain }]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ── Spotify playlist importer ─────────────────────────────────────────────────
+// Fetches tracks from a Spotify playlist or album URL using the Web API
+// (client-credentials flow — no user login required).
+// Requires SPOTIFY_CLIENT_ID + SPOTIFY_CLIENT_SECRET env vars.
+// Resolves each Spotify track to a Lavalink/YouTube track via text search.
+
+let _spotifyToken: { token: string; expiresAt: number } | null = null;
+
+async function getSpotifyToken(): Promise<string | null> {
+  const clientId = process.env.SPOTIFY_CLIENT_ID?.trim();
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET?.trim();
+  if (!clientId || !clientSecret) return null;
+  if (_spotifyToken && Date.now() < _spotifyToken.expiresAt - 60_000) return _spotifyToken.token;
+  try {
+    const creds = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+    const res = await fetch("https://accounts.spotify.com/api/token", {
+      method: "POST",
+      headers: { Authorization: `Basic ${creds}`, "Content-Type": "application/x-www-form-urlencoded" },
+      body: "grant_type=client_credentials",
+      signal: AbortSignal.timeout(6_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { access_token: string; expires_in: number };
+    _spotifyToken = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+    return _spotifyToken.token;
+  } catch { return null; }
+}
+
+export async function fetchSpotifyPlaylistTracks(
+  url: string,
+  requestedBy: string,
+): Promise<QueueTrack[] | null> {
+  const isPlaylist = /\/playlist\//.test(url);
+  const isAlbum   = /\/album\//.test(url);
+  if (!isPlaylist && !isAlbum) return null;
+
+  const token = await getSpotifyToken();
+  if (!token) return null;
+
+  const idMatch = url.match(/\/(?:playlist|album)\/([A-Za-z0-9]+)/);
+  if (!idMatch) return null;
+  const id = idMatch[1];
+
+  const apiUrl = isPlaylist
+    ? `https://api.spotify.com/v1/playlists/${id}/tracks?limit=100&fields=items(track(name,artists(name)))`
+    : `https://api.spotify.com/v1/albums/${id}/tracks?limit=50`;
+
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as any;
+
+    const rawItems: Array<{ name: string; artists?: Array<{ name: string }> }> = isPlaylist
+      ? (data.items ?? []).map((i: any) => i?.track).filter(Boolean)
+      : (data.items ?? []);
+
+    const trackNames = rawItems
+      .filter(t => t?.name)
+      .map(t => ({ title: t.name, artist: t.artists?.[0]?.name ?? "" }));
+
+    if (!trackNames.length) return [];
+
+    const results: QueueTrack[] = [];
+    const BATCH = 5;
+    for (let i = 0; i < trackNames.length; i += BATCH) {
+      const batch = trackNames.slice(i, i + BATCH);
+      const resolved = await Promise.all(
+        batch.map(t => {
+          const q = t.artist ? `${t.artist} - ${t.title}` : t.title;
+          return resolveTrack(q, requestedBy).catch(() => null);
+        }),
+      );
+      for (const r of resolved) if (r) results.push(r);
+      if (i + BATCH < trackNames.length) await new Promise(r => setTimeout(r, 400));
+    }
+    return results;
+  } catch { return null; }
 }

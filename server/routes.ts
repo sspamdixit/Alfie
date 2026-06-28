@@ -3,7 +3,21 @@ import { type Server } from "http";
 import { createHash, timingSafeEqual } from "crypto";
 import rateLimit from "express-rate-limit";
 import { getAlessaBotStatus, getAlessaGuilds } from "../alessa/bot";
-import { isLavalinkAvailable, getLavalinkNodeCount } from "./music";
+import {
+  isLavalinkAvailable,
+  getLavalinkNodeCount,
+  getMusicStatus,
+  pauseMusic,
+  resumeMusic,
+  skipTrack,
+  stopMusic,
+  setMusicVolume,
+  shuffleQueue,
+  setLoop,
+  setCustomEqBand,
+  type LoopMode,
+} from "./music";
+import { storage } from "./storage";
 import { getDjStatus } from "./dj";
 import { z } from "zod";
 import { DASHBOARD_AUTH_HEADER, issueAuthToken, isAuthTokenValid } from "./auth";
@@ -251,6 +265,72 @@ export async function registerRoutes(
       processStartTime: PROCESS_START_TIME,
       uptimeMs: Date.now() - PROCESS_START_TIME,
     });
+  });
+
+  // ── Web music controller ──────────────────────────────────────────────────
+
+  app.get("/api/music/status", (_req, res) => {
+    return res.json({ sessions: getMusicStatus(), updatedAt: Date.now() });
+  });
+
+  const controlSchema = z.object({
+    action: z.enum(["pause", "resume", "skip", "stop", "volume", "shuffle", "loop"]),
+    value: z.number().optional(),
+    loopMode: z.enum(["none", "track", "queue"]).optional(),
+  });
+
+  app.post("/api/music/:guildId/control", async (req, res) => {
+    const { guildId } = req.params;
+    const parsed = controlSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid body." });
+    const { action, value, loopMode } = parsed.data;
+    try {
+      switch (action) {
+        case "pause":   await pauseMusic(guildId); break;
+        case "resume":  await resumeMusic(guildId); break;
+        case "skip":    await skipTrack(guildId); break;
+        case "stop":    await stopMusic(guildId); break;
+        case "shuffle": shuffleQueue(guildId); break;
+        case "volume":  if (typeof value === "number") await setMusicVolume(guildId, value); break;
+        case "loop":    if (loopMode) setLoop(guildId, loopMode as LoopMode); break;
+      }
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/music/:guildId/eq", async (req, res) => {
+    const { guildId } = req.params;
+    const eqSchema = z.object({ band: z.number().int().min(0).max(14), gain: z.number().min(-0.25).max(1.0) });
+    const parsed = eqSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "band 0–14, gain –0.25 to 1.0" });
+    const ok = await setCustomEqBand(guildId, parsed.data.band, parsed.data.gain);
+    return res.json({ ok });
+  });
+
+  // ── Listening stats ───────────────────────────────────────────────────────
+
+  app.get("/api/music/stats", async (_req, res) => {
+    try {
+      const global = await storage.getGlobalPlayStats();
+      return res.json({ ...global, updatedAt: Date.now() });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/music/stats/:guildId", async (req, res) => {
+    try {
+      const { guildId } = req.params;
+      const [stats, topTracks] = await Promise.all([
+        storage.getGuildPlayStats(guildId),
+        storage.getTopTracks(guildId, 20),
+      ]);
+      return res.json({ ...stats, topTracks, updatedAt: Date.now() });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
   });
 
   return httpServer;

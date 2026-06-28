@@ -78,3 +78,7 @@ export function getIO(): SocketIOServer | null {
 export function getLiveViewerCount(): number {
   return _io?.sockets.sockets.size ?? 0;
 }
+
+export function emitMusicUpdate(data: unknown): void {
+  _io?.emit("music_update", data);
+}

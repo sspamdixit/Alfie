@@ -10,6 +10,8 @@ import StatusPage from "@/pages/status";
 import LandingPage from "@/pages/landing";
 import ServersPage from "@/pages/servers";
 import ServerSettingsPage from "@/pages/server-settings";
+import MusicControllerPage from "@/pages/music-controller";
+import StatsPage from "@/pages/stats";
 
 function Router() {
   return (
@@ -19,6 +21,8 @@ function Router() {
       <Route path="/servers/:guildId" component={ServerSettingsPage} />
       <Route path="/admin" component={Home} />
       <Route path="/admin/status" component={StatusPage} />
+      <Route path="/admin/music" component={MusicControllerPage} />
+      <Route path="/admin/stats" component={StatsPage} />
       <Route component={NotFound} />
     </Switch>
   );
