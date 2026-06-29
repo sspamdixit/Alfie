@@ -1220,7 +1220,7 @@ function attachPlayerEvents(player: Player, guildId: string): void {
 
   // Without an "error" listener, Node.js throws any emitted errors as uncaught
   // exceptions and crashes the process — this is the root cause of the 10 s crash.
-  player.on("error", (err: any) => {
+  (player as any).on("error", (err: any) => {
     log(`[Music] Player error in guild ${guildId}: ${err?.message ?? String(err)}`, "discord");
     const q = queues.get(guildId);
     if (!q || q.isStopped || q.isRecovering) return;

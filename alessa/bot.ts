@@ -60,6 +60,7 @@ import {
   type QueueTrack,
   type GuildQueue,
   type FilterPreset,
+  type SearchResult,
 } from "../server/music";
 import {
   djSessions,
@@ -194,7 +195,7 @@ const requestChannels = new Map<string, string>(); // guildId → channelId
 
 // ── Jukebox sessions ──────────────────────────────────────────────────────────
 interface JukeboxSession {
-  options: QueueTrack[];
+  options: SearchResult[];
   votes: Map<string, number>;     // userId → option index
   voteCounts: number[];
   messageId: string;
@@ -812,6 +813,8 @@ export async function startAlessa(): Promise<void> {
       if (hist.length > HISTORY_LIMIT) hist.pop();
       trackHistory.set(guildId, hist);
 
+      storage.recordSongPlay(guildId, track.uri, track.title, track.author, track.requestedBy ?? "unknown").catch(() => {});
+
       const ch = readyClient.channels.cache.get(queue.textChannelId) as TextChannel | null;
       if (!ch) return;
 
@@ -903,6 +906,23 @@ export async function startAlessa(): Promise<void> {
 
       // Rave vibe votes are handled in dj.ts
       if (customId.startsWith("rave_fire_") || customId.startsWith("rave_skull_")) return;
+
+      // Jukebox vote buttons
+      if (customId.startsWith("jukebox_vote_")) {
+        const optIdx = parseInt(customId.slice("jukebox_vote_".length));
+        const session = jukeboxSessions.get(guildId);
+        if (!session || isNaN(optIdx) || optIdx >= session.options.length) {
+          await interaction.reply({ content: "that vote session has ended~", ephemeral: true });
+          return;
+        }
+        const prevVote = session.votes.get(interaction.user.id);
+        if (prevVote !== undefined) session.voteCounts[prevVote] = Math.max(0, session.voteCounts[prevVote] - 1);
+        session.votes.set(interaction.user.id, optIdx);
+        session.voteCounts[optIdx]++;
+        const tally = session.voteCounts.map((v, i) => `${i + 1}. ${v} vote${v !== 1 ? "s" : ""}`).join(" | ");
+        await interaction.reply({ content: `you voted for option **${optIdx + 1}**~ ♡ tally: ${tally}`, ephemeral: true });
+        return;
+      }
 
       const musicActions = [
         "music_pause", "music_skip", "music_stop", "music_like", "music_back",
@@ -1152,6 +1172,15 @@ export async function startAlessa(): Promise<void> {
           "**server settings~**",
           "`/djrole set/clear/show` — restrict music control to a role",
           "`/247` — toggle 24/7 mode (stay in VC always)",
+          "`/requestchannel set/off` — song-request text channel (react ✅/❌)",
+          "",
+          "**premium features~ ✨ (free!)**",
+          "`/sleep <minutes>` — auto-stop after N minutes (0 to cancel)",
+          "`/eq <band> <gain>` — fine-tune EQ (bands 0–14, gain –0.25 to 1.0)",
+          "`/crossfade <seconds>` — blend tracks together (0 = off, max 10)",
+          "`/stats server/global` — listening stats for this server or everywhere",
+          "`/jukebox <query>` — vote queue: search 3 songs, VC votes, winner plays",
+          "`/play <spotify playlist URL>` — import a Spotify playlist directly",
         ].join("\n"),
         allowedMentions: { parse: [] },
       });
@@ -1210,6 +1239,15 @@ export async function startAlessa(): Promise<void> {
         );
 
         const isUrl = /^https?:\/\//i.test(query);
+        // Spotify playlist / album → resolve via Spotify API, not Lavalink
+        if (isUrl && !acFallback && /open\.spotify\.com\/(playlist|album)\//.test(query)) {
+          await interaction.editReply({ content: "fetching spotify playlist~ this might take a moment ♡", allowedMentions: { parse: [] } });
+          const spTracks = (await fetchSpotifyPlaylistTracks(query, interaction.user.username)) ?? [];
+          if (!spTracks.length) { await interaction.editReply({ content: "couldn't find any tracks in that spotify playlist~", allowedMentions: { parse: [] } }); return; }
+          const result = await joinAndPlayMultiple(guildId, voiceChannel.id, interaction.channelId, spTracks, interaction.guild?.shardId ?? 0);
+          await interaction.editReply({ content: `${result === "playing" ? "▶ playing" : "queued"} **${spTracks.length} tracks** from that spotify playlist~ ♡`, allowedMentions: { parse: [] } });
+          return;
+        }
         // Autocomplete selections always resolve as single tracks even if URI looks like a URL
         if (isUrl && !acFallback) {
           const { tracks, playlistName } = await resolvePlaylist(query, interaction.user.username);
@@ -1840,6 +1878,178 @@ export async function startAlessa(): Promise<void> {
       }
       return;
     }
+
+    // ── Sleep timer ────────────────────────────────────────────────────────────
+    if (commandName === "sleep") {
+      const minutes = interaction.options.getInteger("minutes", true);
+      const existing = sleepTimers.get(guildId);
+      if (existing) { clearTimeout(existing.timer); sleepTimers.delete(guildId); }
+      if (minutes === 0) {
+        await interaction.reply({ content: "sleep timer cancelled~! i'll keep playing ♡", allowedMentions: { parse: [] } });
+        return;
+      }
+      const endsAt = Date.now() + minutes * 60_000;
+      const sleepTimer = setTimeout(async () => {
+        sleepTimers.delete(guildId);
+        const q = getQueue(guildId);
+        const notifCh = q ? (client?.channels.cache.get(q.textChannelId) as TextChannel | null) : null;
+        await stopMusic(guildId);
+        notifCh?.send({ content: "sleep timer went off~ sweet dreams~ ♡ (music stopped)", allowedMentions: { parse: [] } }).catch(() => {});
+      }, minutes * 60_000);
+      sleepTimer.unref?.();
+      sleepTimers.set(guildId, { timer: sleepTimer, endsAt });
+      const offAt = `<t:${Math.floor(endsAt / 1000)}:R>`;
+      await interaction.reply({ content: `sleep timer set~ i'll stop playing ${offAt} ♡`, allowedMentions: { parse: [] } });
+      return;
+    }
+
+    // ── Request channel ────────────────────────────────────────────────────────
+    if (commandName === "requestchannel") {
+      const sub = interaction.options.getSubcommand();
+      if (sub === "off") {
+        requestChannels.delete(guildId);
+        await storage.setRequestChannel(guildId, null).catch(() => {});
+        await interaction.reply({ content: "song request channel disabled~! ♡", allowedMentions: { parse: [] } });
+        return;
+      }
+      // sub === "set"
+      const ch = interaction.options.getChannel("channel", true);
+      if (!ch || ch.type !== ChannelType.GuildText) {
+        await interaction.reply({ content: "please pick a text channel~ ♡", ephemeral: true, allowedMentions: { parse: [] } });
+        return;
+      }
+      requestChannels.set(guildId, ch.id);
+      await storage.setRequestChannel(guildId, ch.id).catch(() => {});
+      await interaction.reply({
+        content: `song request channel set to <#${ch.id}>~! users can type track names or URLs there to queue them ♡\n*(requires \`ENABLE_REQUEST_CHANNEL=true\` and Message Content Intent in Discord portal)*`,
+        allowedMentions: { parse: [] },
+      });
+      return;
+    }
+
+    // ── EQ ─────────────────────────────────────────────────────────────────────
+    if (commandName === "eq") {
+      const band = interaction.options.getInteger("band", true);
+      const gain = interaction.options.getNumber("gain", true);
+      const ok = await setCustomEqBand(guildId, band, gain);
+      if (!ok) { await replyEph("no active player to apply EQ to~ play something first ♡"); return; }
+      await interaction.reply({ content: `EQ band **${band}** set to **${gain >= 0 ? "+" : ""}${gain.toFixed(2)}**~ ♡`, allowedMentions: { parse: [] } });
+      return;
+    }
+
+    // ── Crossfade ──────────────────────────────────────────────────────────────
+    if (commandName === "crossfade") {
+      const seconds = interaction.options.getInteger("seconds", true);
+      setCrossfadeSeconds(guildId, seconds);
+      await storage.setGuildCrossfade(guildId, seconds).catch(() => {});
+      await interaction.reply({
+        content: seconds === 0
+          ? "crossfade **off**~ tracks will cut cleanly ♡"
+          : `crossfade set to **${seconds}s**~ tracks will blend together~! ♡`,
+        allowedMentions: { parse: [] },
+      });
+      return;
+    }
+
+    // ── Stats ──────────────────────────────────────────────────────────────────
+    if (commandName === "stats") {
+      const sub = interaction.options.getSubcommand();
+      await interaction.deferReply();
+      try {
+        if (sub === "global") {
+          const s = await storage.getGlobalPlayStats();
+          await interaction.editReply({
+            content: [
+              "**alessa — global listening stats~ ♡**",
+              `🎵 **${s.totalPlays.toLocaleString()}** songs played across all servers`,
+              `🎼 **${s.uniqueTracks.toLocaleString()}** unique tracks ever played`,
+            ].join("\n"),
+            allowedMentions: { parse: [] },
+          });
+        } else {
+          const [s, top] = await Promise.all([
+            storage.getGuildPlayStats(guildId),
+            storage.getTopTracks(guildId, 10),
+          ]);
+          const topList = top.map((t, i) =>
+            `${i + 1}. **${t.trackTitle}** by ${t.trackArtist} — ${t.playCount}×`
+          ).join("\n");
+          await interaction.editReply({
+            content: [
+              "**alessa — server listening stats~ ♡**",
+              `🎵 **${s.totalPlays.toLocaleString()}** songs played in this server`,
+              `🎼 **${s.uniqueTracks.toLocaleString()}** unique tracks`,
+              top.length ? `\n**top ${top.length} tracks~**\n${topList}` : "",
+            ].filter(Boolean).join("\n"),
+            allowedMentions: { parse: [] },
+          });
+        }
+      } catch (err: any) {
+        await interaction.editReply({ content: `stats oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
+      }
+      return;
+    }
+
+    // ── Jukebox (vote queue) ────────────────────────────────────────────────────
+    if (commandName === "jukebox") {
+      const jukeQuery = interaction.options.getString("query", true);
+      const member = interaction.guild?.members.cache.get(interaction.user.id);
+      const voiceChannel = member?.voice?.channel;
+      if (!voiceChannel) { await replyEph("join a voice channel first~ ehehe"); return; }
+      await interaction.deferReply();
+      try {
+        const results = await searchTracks(jukeQuery, 3);
+        if (!results.length) { await interaction.editReply({ content: "couldn't find anything~ try again ♡", allowedMentions: { parse: [] } }); return; }
+        const options = results.slice(0, 3);
+        const desc = options.map((t, i) => `**${i + 1}.** ${t.title} — ${t.author} [${formatDuration(t.duration)}]`).join("\n");
+        const voteRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          options.map((_, i) =>
+            new ButtonBuilder().setCustomId(`jukebox_vote_${i}`).setLabel(`Vote ${i + 1}`).setStyle(ButtonStyle.Secondary)
+          )
+        );
+        const fetchedMsg = await interaction.editReply({
+          content: `**🎛 jukebox vote~!** pick your song — winner plays in 20 seconds ♡\n\n${desc}`,
+          components: [voteRow],
+          allowedMentions: { parse: [] },
+        });
+        const jukeSession: JukeboxSession = {
+          options,
+          votes: new Map(),
+          voteCounts: new Array(options.length).fill(0),
+          messageId: fetchedMsg.id,
+          channelId: interaction.channelId,
+          guildId,
+          voiceChannelId: voiceChannel.id,
+          timer: setTimeout(async () => {
+            jukeboxSessions.delete(guildId);
+            const winner = jukeSession.voteCounts.reduce(
+              (best, v, i) => v > jukeSession.voteCounts[best] ? i : best, 0
+            );
+            const winnerSearch = jukeSession.options[winner];
+            const notifCh = client?.channels.cache.get(jukeSession.channelId) as TextChannel | null;
+            try {
+              const winnerTrack = await resolveTrack(winnerSearch.uri, "jukebox");
+              if (!winnerTrack) throw new Error("couldn't resolve the winning track");
+              const preQ = getQueue(guildId);
+              const wasPlaying = !!(preQ && !preQ.isStopped && (preQ.current || preQ.player.paused));
+              const result = await joinAndPlay(guildId, jukeSession.voiceChannelId, jukeSession.channelId, winnerTrack, interaction.guild?.shardId ?? 0, wasPlaying);
+              notifCh?.send({
+                content: `🎛 jukebox winner: **${winnerTrack.title}** (${jukeSession.voteCounts[winner]} vote${jukeSession.voteCounts[winner] !== 1 ? "s" : ""})~ ${result === "playing" ? "▶ now playing" : "added to queue"} ♡`,
+                allowedMentions: { parse: [] },
+              }).catch(() => {});
+            } catch (err: any) {
+              notifCh?.send({ content: `jukebox oopsie~ ${err.message}`, allowedMentions: { parse: [] } }).catch(() => {});
+            }
+            fetchedMsg.edit({ components: [] }).catch(() => {});
+          }, 20_000),
+        };
+        jukeSession.timer.unref?.();
+        jukeboxSessions.set(guildId, jukeSession);
+      } catch (err: any) {
+        await interaction.editReply({ content: `jukebox oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
+      }
+      return;
+    }
   });
 
   // ── Voice state: auto-disconnect when alone ────────────────────────────────
@@ -1923,8 +2133,40 @@ export async function startAlessa(): Promise<void> {
   // ── Ambient TTS listener ────────────────────────────────────────────────────
   // Only registered when ENABLE_TTS=true (MessageContent intent is active).
   // Without MessageContent, msg.content is always empty — no point listening.
-  if (ttsEnabled) client.on("messageCreate", async (msg) => {
+  if (needsMsgIntents) client.on("messageCreate", async (msg) => {
     if (msg.author.bot || !msg.guildId) return;
+
+    // ── Song request channel ────────────────────────────────────────────────
+    const reqChannelId = requestChannels.get(msg.guildId);
+    if (reqChannelId && msg.channelId === reqChannelId) {
+      const member = msg.guild?.members.cache.get(msg.author.id);
+      const voiceChannel = member?.voice?.channel;
+      if (!voiceChannel || !msg.content.trim()) return;
+      const reqQuery = msg.content.trim();
+      try {
+        const isUrl = /^https?:\/\//i.test(reqQuery);
+        if (isUrl) {
+          const { tracks } = await resolvePlaylist(reqQuery, msg.author.username);
+          if (!tracks.length) { msg.react("❌").catch(() => {}); return; }
+          const preQ = getQueue(msg.guildId);
+          const wasPlaying = !!(preQ && !preQ.isStopped && (preQ.current || preQ.player.paused));
+          await joinAndPlayMultiple(msg.guildId, voiceChannel.id, msg.channelId, tracks, msg.guild?.shardId ?? 0);
+        } else {
+          const track = await resolveTrack(reqQuery, msg.author.username);
+          if (!track) { msg.react("❌").catch(() => {}); return; }
+          const preQ = getQueue(msg.guildId);
+          const wasPlaying = !!(preQ && !preQ.isStopped && (preQ.current || preQ.player.paused));
+          await joinAndPlay(msg.guildId, voiceChannel.id, msg.channelId, track, msg.guild?.shardId ?? 0, wasPlaying);
+        }
+        msg.react("✅").catch(() => {});
+      } catch {
+        msg.react("❌").catch(() => {});
+      }
+      return;
+    }
+
+    // ── Ambient TTS ─────────────────────────────────────────────────────────
+    if (!ttsEnabled) return;
     const session = activeTTSSessions.get(msg.guildId);
     if (!session) return;
     if (msg.author.id !== session.userId) return;

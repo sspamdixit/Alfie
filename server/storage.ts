@@ -18,7 +18,7 @@ export interface IStorage {
   setPlaylistTracks(playlistId: number, tracks: Omit<PlaylistTrack, "id" | "playlistId">[]): Promise<void>;
   // Listening stats
   recordSongPlay(guildId: string, uri: string, title: string, author: string, requestedBy: string): Promise<void>;
-  getTopTracks(guildId: string, limit?: number): Promise<Array<{ uri: string; title: string; author: string; playCount: number }>>;
+  getTopTracks(guildId: string, limit?: number): Promise<Array<{ trackUri: string; trackTitle: string; trackArtist: string; playCount: number }>>;
   getGuildPlayStats(guildId: string): Promise<{ totalPlays: number; uniqueTracks: number }>;
   getGlobalPlayStats(): Promise<{ totalPlays: number; uniqueTracks: number; topGuilds: Array<{ guildId: string; plays: number }> }>;
   // Guild settings
@@ -58,6 +58,43 @@ async function ensurePlaylistTablesOnce(): Promise<void> {
   if (playlistTablesReady) return;
   await ensurePlaylistTables();
   playlistTablesReady = true;
+}
+
+let botMetaTableReady = false;
+async function ensureBotMetaTable(): Promise<void> {
+  if (botMetaTableReady) return;
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS bot_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+  botMetaTableReady = true;
+}
+
+let extraTablesReady = false;
+async function ensureExtraTablesOnce(): Promise<void> {
+  if (extraTablesReady) return;
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS song_plays (
+      id SERIAL PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      uri TEXT NOT NULL,
+      title TEXT NOT NULL,
+      author TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
+      played_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS sp_guild ON song_plays(guild_id)`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS guild_settings (
+      guild_id TEXT PRIMARY KEY,
+      request_channel_id TEXT,
+      crossfade_seconds INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  extraTablesReady = true;
 }
 
 export class DrizzleStorage implements IStorage {
@@ -156,61 +193,21 @@ export class DrizzleStorage implements IStorage {
       tracks.map((t) => ({ ...t, playlistId })),
     );
   }
-}
 
-let botMetaTableReady = false;
-async function ensureBotMetaTable(): Promise<void> {
-  if (botMetaTableReady) return;
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS bot_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )
-  `);
-  botMetaTableReady = true;
-}
+  // ── Listening stats ─────────────────────────────────────────────────────────
 
-// ── New-tables bootstrap ──────────────────────────────────────────────────────
-let extraTablesReady = false;
-async function ensureExtraTablesOnce(): Promise<void> {
-  if (extraTablesReady) return;
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS song_plays (
-      id SERIAL PRIMARY KEY,
-      guild_id TEXT NOT NULL,
-      uri TEXT NOT NULL,
-      title TEXT NOT NULL,
-      author TEXT NOT NULL,
-      requested_by TEXT NOT NULL,
-      played_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS sp_guild ON song_plays(guild_id)`);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS guild_settings (
-      guild_id TEXT PRIMARY KEY,
-      request_channel_id TEXT,
-      crossfade_seconds INTEGER NOT NULL DEFAULT 0
-    )
-  `);
-  extraTablesReady = true;
-}
-
-// ── DrizzleStorage — listening stats & guild settings ────────────────────────
-// Append to the class above; TypeScript merges with the prototype chain
-Object.assign(DrizzleStorage.prototype, {
   async recordSongPlay(guildId: string, uri: string, title: string, author: string, requestedBy: string): Promise<void> {
     await ensureExtraTablesOnce();
     await db.insert(songPlays).values({ guildId, uri, title, author, requestedBy });
-  },
+  }
 
-  async getTopTracks(guildId: string, limit = 10): Promise<Array<{ uri: string; title: string; author: string; playCount: number }>> {
+  async getTopTracks(guildId: string, limit = 10): Promise<Array<{ trackUri: string; trackTitle: string; trackArtist: string; playCount: number }>> {
     await ensureExtraTablesOnce();
     const rows = await db
       .select({
-        uri: songPlays.uri,
-        title: songPlays.title,
-        author: songPlays.author,
+        trackUri: songPlays.uri,
+        trackTitle: songPlays.title,
+        trackArtist: songPlays.author,
         playCount: count(songPlays.id),
       })
       .from(songPlays)
@@ -219,7 +216,7 @@ Object.assign(DrizzleStorage.prototype, {
       .orderBy(desc(count(songPlays.id)))
       .limit(limit);
     return rows.map(r => ({ ...r, playCount: Number(r.playCount) }));
-  },
+  }
 
   async getGuildPlayStats(guildId: string): Promise<{ totalPlays: number; uniqueTracks: number }> {
     await ensureExtraTablesOnce();
@@ -227,19 +224,22 @@ Object.assign(DrizzleStorage.prototype, {
       .select({ total: count(songPlays.id) })
       .from(songPlays)
       .where(eq(songPlays.guildId, guildId));
-    const [uniqueRow] = await db.execute(
-      sql`SELECT COUNT(DISTINCT uri) AS unique_tracks FROM song_plays WHERE guild_id = ${guildId}`
-    );
+    const [uniqueRow] = await db
+      .select({ uniqueTracks: sql<number>`COUNT(DISTINCT ${songPlays.uri})` })
+      .from(songPlays)
+      .where(eq(songPlays.guildId, guildId));
     return {
       totalPlays: Number(totalRow?.total ?? 0),
-      uniqueTracks: Number((uniqueRow as any)?.unique_tracks ?? 0),
+      uniqueTracks: Number(uniqueRow?.uniqueTracks ?? 0),
     };
-  },
+  }
 
   async getGlobalPlayStats(): Promise<{ totalPlays: number; uniqueTracks: number; topGuilds: Array<{ guildId: string; plays: number }> }> {
     await ensureExtraTablesOnce();
     const [totalRow] = await db.select({ total: count(songPlays.id) }).from(songPlays);
-    const [uniqueRow] = await db.execute(sql`SELECT COUNT(DISTINCT uri) AS unique_tracks FROM song_plays`);
+    const [uniqueRow] = await db
+      .select({ uniqueTracks: sql<number>`COUNT(DISTINCT ${songPlays.uri})` })
+      .from(songPlays);
     const guildRows = await db
       .select({ guildId: songPlays.guildId, plays: count(songPlays.id) })
       .from(songPlays)
@@ -248,21 +248,23 @@ Object.assign(DrizzleStorage.prototype, {
       .limit(10);
     return {
       totalPlays: Number(totalRow?.total ?? 0),
-      uniqueTracks: Number((uniqueRow as any)?.unique_tracks ?? 0),
+      uniqueTracks: Number(uniqueRow?.uniqueTracks ?? 0),
       topGuilds: guildRows.map(r => ({ guildId: r.guildId, plays: Number(r.plays) })),
     };
-  },
+  }
+
+  // ── Guild settings ──────────────────────────────────────────────────────────
 
   async getGuildSettings(guildId: string): Promise<GuildSettingsRow | null> {
     await ensureExtraTablesOnce();
     const rows = await db.select().from(guildSettings).where(eq(guildSettings.guildId, guildId)).limit(1);
     return rows[0] ?? null;
-  },
+  }
 
   async getAllGuildSettings(): Promise<GuildSettingsRow[]> {
     await ensureExtraTablesOnce();
     return db.select().from(guildSettings);
-  },
+  }
 
   async setRequestChannel(guildId: string, channelId: string | null): Promise<void> {
     await ensureExtraTablesOnce();
@@ -270,7 +272,7 @@ Object.assign(DrizzleStorage.prototype, {
       .insert(guildSettings)
       .values({ guildId, requestChannelId: channelId, crossfadeSeconds: 0 })
       .onConflictDoUpdate({ target: guildSettings.guildId, set: { requestChannelId: channelId } });
-  },
+  }
 
   async setGuildCrossfade(guildId: string, seconds: number): Promise<void> {
     await ensureExtraTablesOnce();
@@ -278,7 +280,7 @@ Object.assign(DrizzleStorage.prototype, {
       .insert(guildSettings)
       .values({ guildId, crossfadeSeconds: seconds })
       .onConflictDoUpdate({ target: guildSettings.guildId, set: { crossfadeSeconds: seconds } });
-  },
-} satisfies Pick<IStorage, "recordSongPlay" | "getTopTracks" | "getGuildPlayStats" | "getGlobalPlayStats" | "getGuildSettings" | "getAllGuildSettings" | "setRequestChannel" | "setGuildCrossfade">);
+  }
+}
 
 export const storage = new DrizzleStorage();

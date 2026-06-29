@@ -3,3 +3,4 @@
 - [Search & resolve fixes](search-resolve-fixes.md) — root causes of wrong search results and music drops; all resolve calls now go through resolveWithTimeout.
 - [Node pool & resolver](node-pool-resolver.md) — LAVALINK_URL ignored; only LAVALINK_NODES used; quality-based resolver.
 - [TTS architecture](tts-architecture.md) — TTS is fully Lavalink-independent; uses @discordjs/voice + 3 HTTP providers.
+- [Storage class extension](storage-class-extension.md) — Object.assign on DrizzleStorage.prototype fails TS implements check; always put new methods directly in the class body.
