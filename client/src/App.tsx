@@ -12,6 +12,8 @@ import ServersPage from "@/pages/servers";
 import ServerSettingsPage from "@/pages/server-settings";
 import MusicControllerPage from "@/pages/music-controller";
 import StatsPage from "@/pages/stats";
+import PrivacyPage from "@/pages/privacy";
+import TermsPage from "@/pages/terms";
 
 function Router() {
   return (
@@ -23,6 +25,8 @@ function Router() {
       <Route path="/admin/status" component={StatusPage} />
       <Route path="/admin/music" component={MusicControllerPage} />
       <Route path="/admin/stats" component={StatsPage} />
+      <Route path="/privacy" component={PrivacyPage} />
+      <Route path="/terms" component={TermsPage} />
       <Route component={NotFound} />
     </Switch>
   );

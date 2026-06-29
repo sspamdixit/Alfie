@@ -612,7 +612,10 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName("ravestop").setDescription("stop the current rave session"),
   new SlashCommandBuilder()
     .setName("speak")
-    .setDescription("start an ambient TTS session — everything you type in this channel gets spoken aloud"),
+    .setDescription("speak text aloud in your voice channel, or start/stop an ambient TTS session")
+    .addStringOption((o) =>
+      o.setName("text").setDescription("text to speak immediately (omit to toggle ambient session)").setRequired(false),
+    ),
   // ── Audio effects ────────────────────────────────────────────────────────────
   new SlashCommandBuilder()
     .setName("bassboost")
@@ -1635,11 +1638,30 @@ export async function startAlessa(): Promise<void> {
     }
 
     if (commandName === "speak") {
-      const member = interaction.guild?.members.cache.get(interaction.user.id);
-      const voiceChannel = member?.voice?.channel;
+      const member = interaction.guild?.members.cache.get(interaction.user.id)
+        ?? await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
+      const voiceChannel = (member as any)?.voice?.channel;
       if (!voiceChannel) { await replyEph("join a voice channel first~ ehehe"); return; }
 
-      // Toggle: running the command again stops the session
+      const speakText = interaction.options.getString("text");
+
+      // ── Single-shot mode: /speak <text> ───────────────────────────────────
+      if (speakText) {
+        await interaction.deferReply({ ephemeral: true });
+        try {
+          const result = await speakInVoice(guildId, speakText, voiceChannel.id, interaction.channelId, interaction.guild?.shardId ?? 0, interaction.user.username);
+          if (!result.ok) {
+            await interaction.editReply({ content: `TTS error~ ${result.reason ?? "all providers failed"}` });
+          } else {
+            await interaction.editReply({ content: `🔊 spoken: *${speakText.slice(0, 120)}${speakText.length > 120 ? "…" : ""}* ♡` });
+          }
+        } catch (err: any) {
+          await interaction.editReply({ content: `TTS oopsie~ ${err.message}` });
+        }
+        return;
+      }
+
+      // ── Ambient session mode: /speak (no text) ────────────────────────────
       const existing = activeTTSSessions.get(guildId);
       if (existing && existing.userId === interaction.user.id) {
         activeTTSSessions.delete(guildId);
@@ -1648,15 +1670,21 @@ export async function startAlessa(): Promise<void> {
         return;
       }
 
-      // Join the voice channel and start the session
+      if (!ttsEnabled) {
+        await replyEph(
+          "ambient TTS requires `ENABLE_TTS=true` **and** Message Content Intent enabled in the Discord Developer Portal (Bot → Privileged Gateway Intents)~\n\nfor single-shot TTS without any setup, use `/speak <your text>` instead ♡"
+        );
+        return;
+      }
+
       try {
         const joinResult = await speakInVoice(guildId, "ready~", voiceChannel.id, interaction.channelId, interaction.guild?.shardId ?? 0, interaction.user.username);
         if (!joinResult.ok) {
-          await replyEph(`couldn't join your voice channel~ ${joinResult.reason ?? "unknown error"}`);
+          await replyEph(`couldn't start TTS~ ${joinResult.reason ?? "unknown error"}`);
           return;
         }
       } catch (err: any) {
-        await replyEph(`couldn't join your voice channel~ ${err.message}`);
+        await replyEph(`couldn't start TTS~ ${err.message}`);
         return;
       }
 
