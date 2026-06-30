@@ -1,10 +1,10 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, serial, timestamp, integer } from "drizzle-orm/pg-core";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
 });
@@ -17,25 +17,25 @@ export const insertUserSchema = createInsertSchema(users).pick({
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
-export const botMeta = pgTable("bot_meta", {
+export const botMeta = sqliteTable("bot_meta", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
 
 export type BotMetaRow = typeof botMeta.$inferSelect;
 
-export const savedPlaylists = pgTable("saved_playlists", {
-  id: serial("id").primaryKey(),
+export const savedPlaylists = sqliteTable("saved_playlists", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   userId: text("user_id").notNull(),
   guildId: text("guild_id").notNull(),
   name: text("name").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
 });
 
 export type SavedPlaylist = typeof savedPlaylists.$inferSelect;
 
-export const playlistTracks = pgTable("playlist_tracks", {
-  id: serial("id").primaryKey(),
+export const playlistTracks = sqliteTable("playlist_tracks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   playlistId: integer("playlist_id").notNull(),
   position: integer("position").notNull(),
   encoded: text("encoded").notNull(),
@@ -48,21 +48,19 @@ export const playlistTracks = pgTable("playlist_tracks", {
 
 export type PlaylistTrack = typeof playlistTracks.$inferSelect;
 
-// ── Listening stats ───────────────────────────────────────────────────────────
-export const songPlays = pgTable("song_plays", {
-  id: serial("id").primaryKey(),
+export const songPlays = sqliteTable("song_plays", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   guildId: text("guild_id").notNull(),
   uri: text("uri").notNull(),
   title: text("title").notNull(),
   author: text("author").notNull(),
   requestedBy: text("requested_by").notNull(),
-  playedAt: timestamp("played_at", { withTimezone: true }).notNull().defaultNow(),
+  playedAt: text("played_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
 });
 
 export type SongPlay = typeof songPlays.$inferSelect;
 
-// ── Per-guild feature settings ────────────────────────────────────────────────
-export const guildSettings = pgTable("guild_settings", {
+export const guildSettings = sqliteTable("guild_settings", {
   guildId: text("guild_id").primaryKey(),
   requestChannelId: text("request_channel_id"),
   crossfadeSeconds: integer("crossfade_seconds").notNull().default(0),

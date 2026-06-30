@@ -29,18 +29,18 @@ export interface IStorage {
 }
 
 export async function ensurePlaylistTables(): Promise<void> {
-  await db.execute(sql`
+  await db.run(sql`
     CREATE TABLE IF NOT EXISTS saved_playlists (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id TEXT NOT NULL,
       guild_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     )
   `);
-  await db.execute(sql`
+  await db.run(sql`
     CREATE TABLE IF NOT EXISTS playlist_tracks (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       playlist_id INTEGER NOT NULL,
       position INTEGER NOT NULL,
       encoded TEXT NOT NULL,
@@ -63,7 +63,7 @@ async function ensurePlaylistTablesOnce(): Promise<void> {
 let botMetaTableReady = false;
 async function ensureBotMetaTable(): Promise<void> {
   if (botMetaTableReady) return;
-  await db.execute(sql`
+  await db.run(sql`
     CREATE TABLE IF NOT EXISTS bot_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -75,19 +75,19 @@ async function ensureBotMetaTable(): Promise<void> {
 let extraTablesReady = false;
 async function ensureExtraTablesOnce(): Promise<void> {
   if (extraTablesReady) return;
-  await db.execute(sql`
+  await db.run(sql`
     CREATE TABLE IF NOT EXISTS song_plays (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       guild_id TEXT NOT NULL,
       uri TEXT NOT NULL,
       title TEXT NOT NULL,
       author TEXT NOT NULL,
       requested_by TEXT NOT NULL,
-      played_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      played_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     )
   `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS sp_guild ON song_plays(guild_id)`);
-  await db.execute(sql`
+  await db.run(sql`CREATE INDEX IF NOT EXISTS sp_guild ON song_plays(guild_id)`);
+  await db.run(sql`
     CREATE TABLE IF NOT EXISTS guild_settings (
       guild_id TEXT PRIMARY KEY,
       request_channel_id TEXT,
