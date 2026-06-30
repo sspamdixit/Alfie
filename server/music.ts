@@ -1913,6 +1913,20 @@ async function waitForJoin(guildId: string): Promise<GuildQueue | null> {
   });
 }
 
+// ── joinVoiceOnly ─────────────────────────────────────────────────────────────
+// Joins a voice channel without starting playback. Used to rejoin 24/7 VCs
+// after a scheduled bot restart.
+export async function joinVoiceOnly(
+  guildId: string,
+  voiceChannelId: string,
+  textChannelId: string,
+  shardId = 0,
+): Promise<void> {
+  if (!shoukaku) return;
+  if (queues.has(guildId)) return;
+  await createQueue(guildId, voiceChannelId, textChannelId, shardId);
+}
+
 export async function joinAndPlay(
   guildId: string,
   voiceChannelId: string,

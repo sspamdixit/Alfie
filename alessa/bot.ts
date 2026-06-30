@@ -58,6 +58,7 @@ import {
   setCustomEqBand,
   fetchSpotifyPlaylistTracks,
   getMusicStatus,
+  joinVoiceOnly,
   type QueueTrack,
   type GuildQueue,
   type FilterPreset,
@@ -703,17 +704,27 @@ const SLASH_COMMANDS = [
 const PERIODIC_RESTART_MS = 6 * 60 * 60 * 1000;
 let restartQueued = false;
 
+interface RejoinEntry { guildId: string; voiceChannelId: string; textChannelId: string; }
+let pendingRejoinSessions: RejoinEntry[] = [];
+
 function performBotRestart(): void {
   log("Performing scheduled restart now.", "restart");
   restartQueued = false;
+  // Capture 24/7 guild sessions so the bot can rejoin them after restart.
+  // This survives stopAlessa() because it's a module-level variable.
+  pendingRejoinSessions = getMusicStatus()
+    .filter((s) => guilds247.has(s.guildId))
+    .map((s) => ({ guildId: s.guildId, voiceChannelId: s.voiceChannelId, textChannelId: s.textChannelId }));
   stopAlessa();
   const t = setTimeout(() => { startAlessa(); }, 3_000);
   t.unref?.();
 }
 
 function scheduleRestartWhenIdle(): void {
-  const active = getMusicStatus().filter((s) => s.current !== null);
-  if (active.length === 0) {
+  // Only wait on non-24/7 sessions — 24/7 guilds may never stop, and the bot
+  // will rejoin them automatically after restart anyway.
+  const blocking = getMusicStatus().filter((s) => s.current !== null && !guilds247.has(s.guildId));
+  if (blocking.length === 0) {
     performBotRestart();
     return;
   }
@@ -729,13 +740,14 @@ function schedulePeriodicRestart(): void {
   const t = setTimeout(() => {
     backgroundTimers.delete(t);
     log("6-hour restart window reached — checking music sessions.", "restart");
-    const active = getMusicStatus().filter((s) => s.current !== null);
-    if (active.length === 0) {
+    // 24/7 guilds don't block the restart — they get rejoined after.
+    const blocking = getMusicStatus().filter((s) => s.current !== null && !guilds247.has(s.guildId));
+    if (blocking.length === 0) {
       performBotRestart();
     } else {
       restartQueued = true;
-      log(`Restart queued — ${active.length} active session(s) still playing.`, "restart");
-      for (const session of active) {
+      log(`Restart queued — ${blocking.length} non-24/7 session(s) still playing.`, "restart");
+      for (const session of blocking) {
         const ch = client?.channels.cache.get(session.textChannelId) as TextChannel | null;
         ch?.send({ content: "🔄 scheduled restart coming up~ i'll restart once the music stops ♡", allowedMentions: { parse: [] } }).catch(() => {});
       }
@@ -832,6 +844,21 @@ export async function startAlessa(): Promise<void> {
     setRaveClient(readyClient);
     initMusic(readyClient);
     setTTSClient(readyClient);
+
+    // Rejoin any 24/7 VCs that were active before the scheduled restart
+    if (pendingRejoinSessions.length > 0) {
+      const toRejoin = [...pendingRejoinSessions];
+      pendingRejoinSessions = [];
+      for (const session of toRejoin) {
+        const shardId = readyClient.guilds.cache.get(session.guildId)?.shardId ?? 0;
+        joinVoiceOnly(session.guildId, session.voiceChannelId, session.textChannelId, shardId)
+          .then(() => {
+            const ch = readyClient.channels.cache.get(session.textChannelId) as TextChannel | null;
+            ch?.send({ content: "🔄 restarted and back~ waiting for your next song ♡", allowedMentions: { parse: [] } }).catch(() => {});
+          })
+          .catch((err: any) => log(`[restart] Failed to rejoin VC for guild ${session.guildId}: ${err.message}`, "restart"));
+      }
+    }
 
     // Load persistent guild settings (request channels, crossfade)
     try {
