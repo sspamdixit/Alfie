@@ -1913,9 +1913,33 @@ async function waitForJoin(guildId: string): Promise<GuildQueue | null> {
   });
 }
 
+// ── snapshotQueueForRestart ───────────────────────────────────────────────────
+// Freezes a guild's live queue so it can be restored after a scheduled bot
+// restart. The current track is prepended at index 0 so it replays from the
+// top. No TTL extension needed — 30 min covers any realistic restart window.
+export function snapshotQueueForRestart(guildId: string): void {
+  const queue = queues.get(guildId);
+  if (!queue) return;
+  const allTracks = queue.current
+    ? [queue.current, ...queue.tracks]
+    : [...queue.tracks];
+  if (allTracks.length === 0) return;
+  frozenQueues.set(guildId, {
+    tracks: allTracks,
+    textChannelId: queue.textChannelId,
+    voiceChannelId: queue.voiceChannelId,
+    volume: queue.volume,
+    loop: queue.loop,
+    autoplay: queue.autoplay,
+    recentSeeds: [...queue.recentSeeds],
+    recentlyPlayedUris: [...queue.recentlyPlayedUris],
+    frozenAt: Date.now(),
+  });
+}
+
 // ── joinVoiceOnly ─────────────────────────────────────────────────────────────
-// Joins a voice channel without starting playback. Used to rejoin 24/7 VCs
-// after a scheduled bot restart.
+// Joins a voice channel and, if a frozen queue snapshot exists (e.g. left by
+// snapshotQueueForRestart), restores it and resumes playback automatically.
 export async function joinVoiceOnly(
   guildId: string,
   voiceChannelId: string,
@@ -1924,7 +1948,25 @@ export async function joinVoiceOnly(
 ): Promise<void> {
   if (!shoukaku) return;
   if (queues.has(guildId)) return;
-  await createQueue(guildId, voiceChannelId, textChannelId, shardId);
+
+  const queue = await createQueue(guildId, voiceChannelId, textChannelId, shardId);
+
+  const frozen = popFrozenQueue(guildId);
+  if (!frozen || frozen.tracks.length === 0) return;
+
+  queue.volume = frozen.volume;
+  queue.loop = frozen.loop;
+  queue.autoplay = frozen.autoplay;
+  queue.recentSeeds = [...frozen.recentSeeds];
+  queue.recentlyPlayedUris = [...frozen.recentlyPlayedUris];
+
+  const [first, ...rest] = frozen.tracks;
+  queue.tracks.push(...rest);
+  queue.current = first;
+  await resetPlayerFilters(queue.player, guildId);
+  await queue.player.playTrack({ track: { encoded: first.encoded } });
+  await queue.player.setGlobalVolume(queue.volume);
+  nowPlayingCallback?.(guildId, first, queue);
 }
 
 export async function joinAndPlay(
