@@ -2103,13 +2103,13 @@ export async function startAlessa(): Promise<void> {
       if (timer) {
         clearTimeout(timer);
         aloneDisconnectTimers.delete(guildId);
-        if (autoPausedGuilds.has(guildId)) {
-          autoPausedGuilds.delete(guildId);
-          await resumeMusic(guildId);
-          markGuildResumed(guildId);
-          const ch = client?.channels.cache.get(queue.textChannelId) as TextChannel | null;
-          ch?.send({ content: "yay, someone's back~! resuming ♡", allowedMentions: { parse: [] } }).catch(() => {});
-        }
+      }
+      if (autoPausedGuilds.has(guildId)) {
+        autoPausedGuilds.delete(guildId);
+        await resumeMusic(guildId);
+        markGuildResumed(guildId);
+        const ch = client?.channels.cache.get(queue.textChannelId) as TextChannel | null;
+        ch?.send({ content: "yay, someone's back~! resuming ♡", allowedMentions: { parse: [] } }).catch(() => {});
       }
       return;
     }
@@ -2130,13 +2130,17 @@ export async function startAlessa(): Promise<void> {
       const humanCount = channel.members.filter((m) => !m.user.bot).size;
       if (humanCount > 0) return;
 
-      // 24/7 mode: stay in VC no matter what — don't pause or start disconnect timer
-      if (guilds247.has(guildId)) return;
-
       if (queue.current && !queue.player.paused) {
         await pauseMusic(guildId);
         markGuildPaused(guildId);
         autoPausedGuilds.add(guildId);
+      }
+
+      // 24/7 mode: stay in VC and wait for someone to return — no disconnect timer
+      if (guilds247.has(guildId)) {
+        const ch247 = client?.channels.cache.get(queue.textChannelId) as TextChannel | null;
+        ch247?.send({ content: "everyone left~ pausing and waiting in VC ♡ i'll resume when someone comes back!", allowedMentions: { parse: [] } }).catch(() => {});
+        return;
       }
 
       const existing = aloneDisconnectTimers.get(guildId);
