@@ -57,6 +57,7 @@ import {
   getCrossfadeSeconds,
   setCustomEqBand,
   fetchSpotifyPlaylistTracks,
+  getMusicStatus,
   type QueueTrack,
   type GuildQueue,
   type FilterPreset,
@@ -698,6 +699,53 @@ const SLASH_COMMANDS = [
 ];
 
 // ── Bot startup ───────────────────────────────────────────────────────────────
+// ── Scheduled periodic restart (every 6 h) ────────────────────────────────────
+const PERIODIC_RESTART_MS = 6 * 60 * 60 * 1000;
+let restartQueued = false;
+
+function performBotRestart(): void {
+  log("Performing scheduled restart now.", "restart");
+  restartQueued = false;
+  stopAlessa();
+  const t = setTimeout(() => { startAlessa(); }, 3_000);
+  t.unref?.();
+}
+
+function scheduleRestartWhenIdle(): void {
+  const active = getMusicStatus().filter((s) => s.current !== null);
+  if (active.length === 0) {
+    performBotRestart();
+    return;
+  }
+  const t = setTimeout(() => {
+    backgroundTimers.delete(t);
+    scheduleRestartWhenIdle();
+  }, 60_000);
+  t.unref?.();
+  backgroundTimers.add(t);
+}
+
+function schedulePeriodicRestart(): void {
+  const t = setTimeout(() => {
+    backgroundTimers.delete(t);
+    log("6-hour restart window reached — checking music sessions.", "restart");
+    const active = getMusicStatus().filter((s) => s.current !== null);
+    if (active.length === 0) {
+      performBotRestart();
+    } else {
+      restartQueued = true;
+      log(`Restart queued — ${active.length} active session(s) still playing.`, "restart");
+      for (const session of active) {
+        const ch = client?.channels.cache.get(session.textChannelId) as TextChannel | null;
+        ch?.send({ content: "🔄 scheduled restart coming up~ i'll restart once the music stops ♡", allowedMentions: { parse: [] } }).catch(() => {});
+      }
+      scheduleRestartWhenIdle();
+    }
+  }, PERIODIC_RESTART_MS);
+  t.unref?.();
+  backgroundTimers.add(t);
+}
+
 export async function startAlessa(): Promise<void> {
   const rawToken = (process.env.ALESSA_TOKEN ?? process.env.ALFIE_TOKEN ?? process.env.DISCORD_TOKEN ?? "").trim();
   if (!rawToken) {
@@ -846,7 +894,11 @@ export async function startAlessa(): Promise<void> {
 
     setQueueStopCallback((guildId) => {
       markGuildStopped(guildId);
+      // If a restart is queued, check whether all sessions are now idle
+      if (restartQueued) scheduleRestartWhenIdle();
     });
+
+    schedulePeriodicRestart();
 
     // Register slash commands per guild
     const rest = new REST({ version: "10" }).setToken(rawToken);
@@ -2271,6 +2323,7 @@ export function getAlessaGuilds(): Array<{ id: string; name: string }> {
 }
 
 export function stopAlessa(): void {
+  restartQueued = false;
   if (loginRetryTimer) { clearTimeout(loginRetryTimer); loginRetryTimer = null; }
   for (const t of backgroundTimers) { clearInterval(t); clearTimeout(t); }
   backgroundTimers.clear();
