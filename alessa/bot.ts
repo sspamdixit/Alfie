@@ -59,6 +59,8 @@ import {
   fetchSpotifyPlaylistTracks,
   debugReset,
   searchAsQueueTracks,
+  freezeQueue,
+  joinAndResumeFrozen,
   type QueueTrack,
   type GuildQueue,
   type FilterPreset,
@@ -73,6 +75,7 @@ import {
   cancelDjFades,
   setRaveClient,
 } from "../server/dj";
+import { joinVoiceChannel as dvsJoinVC, getVoiceConnection } from "@discordjs/voice";
 import { speakInVoice, setTTSClient, disconnectTTS } from "../server/tts";
 import { storage } from "../server/storage";
 
@@ -187,6 +190,9 @@ function markGuildStopped(guildId: string): void {
 // ── DJ role & 24/7 mode ───────────────────────────────────────────────────────
 const djRoles = new Map<string, string>();   // guildId → roleId
 const guilds247 = new Set<string>();         // guildIds with 24/7 mode enabled
+// idle 24/7: bot freed Lavalink but is sitting in VC via @discordjs/voice
+interface Idle247Entry { voiceChannelId: string; textChannelId: string; shardId: number; }
+const idle247Connections = new Map<string, Idle247Entry>();
 
 // ── Sleep timers ──────────────────────────────────────────────────────────────
 interface SleepTimer { timer: ReturnType<typeof setTimeout>; endsAt: number }
@@ -699,6 +705,35 @@ const SLASH_COMMANDS = [
     .addStringOption((o) =>
       o.setName("query").setDescription("what to search for").setRequired(true).setAutocomplete(true)),
 ];
+
+// ── 24/7 idle helpers ─────────────────────────────────────────────────────────
+// Freeze the queue, release Lavalink, then stay in the VC silently so the bot
+// remains visible without wasting node resources on empty playback.
+async function enterIdle247(guildId: string, voiceChannelId: string, textChannelId: string, shardId: number): Promise<void> {
+  freezeQueue(guildId);
+  await disconnectMusic(guildId);
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) return;
+  // Small pause so Shoukaku's VOICE_STATE_UPDATE leave propagates before we rejoin
+  await new Promise<void>((r) => setTimeout(r, 500));
+  try {
+    dvsJoinVC({
+      channelId: voiceChannelId,
+      guildId,
+      adapterCreator: guild.voiceAdapterCreator,
+      selfDeaf: true,
+      selfMute: true,
+    });
+    idle247Connections.set(guildId, { voiceChannelId, textChannelId, shardId });
+  } catch (err: any) {
+    log(`[247] Failed to enter idle mode for ${guildId}: ${err.message}`, "discord");
+  }
+}
+
+function exitIdle247(guildId: string): void {
+  idle247Connections.delete(guildId);
+  try { getVoiceConnection(guildId)?.destroy(); } catch { /* ignore */ }
+}
 
 // ── Bot startup ───────────────────────────────────────────────────────────────
 export async function startAlessa(): Promise<void> {
@@ -1926,10 +1961,11 @@ export async function startAlessa(): Promise<void> {
     if (commandName === "247") {
       if (guilds247.has(guildId)) {
         guilds247.delete(guildId);
+        if (idle247Connections.has(guildId)) exitIdle247(guildId);
         await interaction.reply({ content: "24/7 mode **off**~ i'll leave when everyone's gone ♡", allowedMentions: { parse: [] } });
       } else {
         guilds247.add(guildId);
-        await interaction.reply({ content: "24/7 mode **on**~! i'll stay in VC no matter what, ehehe ♡", allowedMentions: { parse: [] } });
+        await interaction.reply({ content: "24/7 mode **on**~! i'll stay in VC, but i'll free the node when no one's around ♡", allowedMentions: { parse: [] } });
       }
       return;
     }
@@ -2150,11 +2186,29 @@ export async function startAlessa(): Promise<void> {
     const guildId = oldState.guild?.id ?? newState.guild?.id;
     if (!guildId) return;
 
-    const queue = getQueue(guildId);
-    if (!queue) return;
-
     const leftChannelId = oldState.channelId;
     const joinedChannelId = newState.channelId;
+
+    // ── Wake up from idle 24/7 mode ─────────────────────────────────────────
+    const idle247Entry = idle247Connections.get(guildId);
+    if (idle247Entry && joinedChannelId === idle247Entry.voiceChannelId) {
+      exitIdle247(guildId);
+      // Wait for the @discordjs/voice connection to release before Shoukaku joins
+      await new Promise<void>((r) => setTimeout(r, 400));
+      const resumed = await joinAndResumeFrozen(
+        guildId, idle247Entry.voiceChannelId, idle247Entry.textChannelId, idle247Entry.shardId,
+      );
+      const ch = client?.channels.cache.get(idle247Entry.textChannelId) as TextChannel | null;
+      if (resumed) {
+        ch?.send({ content: "yay, someone's back~ resuming ♡", allowedMentions: { parse: [] } }).catch(() => {});
+      } else {
+        ch?.send({ content: "someone's here~ use /play to add songs ♡", allowedMentions: { parse: [] } }).catch(() => {});
+      }
+      return;
+    }
+
+    const queue = getQueue(guildId);
+    if (!queue) return;
 
     if (joinedChannelId === queue.voiceChannelId) {
       const timer = aloneDisconnectTimers.get(guildId);
@@ -2188,17 +2242,21 @@ export async function startAlessa(): Promise<void> {
       const humanCount = channel.members.filter((m) => !m.user.bot).size;
       if (humanCount > 0) return;
 
+      // 24/7 mode: freeze queue, release Lavalink, sit silently in VC
+      if (guilds247.has(guildId)) {
+        const vc247Id = queue.voiceChannelId;
+        const tc247Id = queue.textChannelId;
+        const sid247 = newState.guild?.shardId ?? 0;
+        await enterIdle247(guildId, vc247Id, tc247Id, sid247);
+        const ch247 = client?.channels.cache.get(tc247Id) as TextChannel | null;
+        ch247?.send({ content: "everyone left~ freeing the node and waiting in VC ♡ i'll wake up when someone comes back!", allowedMentions: { parse: [] } }).catch(() => {});
+        return;
+      }
+
       if (queue.current && !queue.player.paused) {
         await pauseMusic(guildId);
         markGuildPaused(guildId);
         autoPausedGuilds.add(guildId);
-      }
-
-      // 24/7 mode: stay in VC and wait for someone to return — no disconnect timer
-      if (guilds247.has(guildId)) {
-        const ch247 = client?.channels.cache.get(queue.textChannelId) as TextChannel | null;
-        ch247?.send({ content: "everyone left~ pausing and waiting in VC ♡ i'll resume when someone comes back!", allowedMentions: { parse: [] } }).catch(() => {});
-        return;
       }
 
       const existing = aloneDisconnectTimers.get(guildId);
@@ -2329,6 +2387,10 @@ export function getAlessaGuilds(): Array<{ id: string; name: string }> {
 }
 
 export function stopAlessa(): void {
+  for (const guildId of idle247Connections.keys()) {
+    try { getVoiceConnection(guildId)?.destroy(); } catch { /* ignore */ }
+  }
+  idle247Connections.clear();
   if (loginRetryTimer) { clearTimeout(loginRetryTimer); loginRetryTimer = null; }
   for (const t of backgroundTimers) { clearInterval(t); clearTimeout(t); }
   backgroundTimers.clear();

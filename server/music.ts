@@ -1935,6 +1935,63 @@ async function waitForJoin(guildId: string): Promise<GuildQueue | null> {
 }
 
 
+// ── freezeQueue ───────────────────────────────────────────────────────────────
+// Snapshots the live queue to frozenQueues so Lavalink can be released while
+// the bot stays visible in the VC (idle 24/7 mode). Returns true if frozen.
+export function freezeQueue(guildId: string): boolean {
+  const queue = queues.get(guildId);
+  if (!queue) return false;
+  const allTracks = queue.current
+    ? [queue.current, ...queue.tracks]
+    : [...queue.tracks];
+  if (allTracks.length === 0) return false;
+  frozenQueues.set(guildId, {
+    tracks: allTracks,
+    textChannelId: queue.textChannelId,
+    voiceChannelId: queue.voiceChannelId,
+    volume: queue.volume,
+    loop: queue.loop,
+    autoplay: queue.autoplay,
+    recentSeeds: [...queue.recentSeeds],
+    recentlyPlayedUris: [...queue.recentlyPlayedUris],
+    frozenAt: Date.now(),
+  });
+  return true;
+}
+
+// ── joinAndResumeFrozen ───────────────────────────────────────────────────────
+// Joins a voice channel and, if a frozen queue snapshot exists, restores it
+// and resumes playback. Returns true if playback was started.
+export async function joinAndResumeFrozen(
+  guildId: string,
+  voiceChannelId: string,
+  textChannelId: string,
+  shardId = 0,
+): Promise<boolean> {
+  if (!shoukaku) return false;
+  if (queues.has(guildId)) return false;
+
+  const queue = await createQueue(guildId, voiceChannelId, textChannelId, shardId);
+
+  const frozen = popFrozenQueue(guildId);
+  if (!frozen || frozen.tracks.length === 0) return false;
+
+  queue.volume = frozen.volume;
+  queue.loop = frozen.loop;
+  queue.autoplay = frozen.autoplay;
+  queue.recentSeeds = [...frozen.recentSeeds];
+  queue.recentlyPlayedUris = [...frozen.recentlyPlayedUris];
+
+  const [first, ...rest] = frozen.tracks;
+  queue.tracks.push(...rest);
+  queue.current = first;
+  await resetPlayerFilters(queue.player, guildId);
+  await queue.player.playTrack({ track: { encoded: first.encoded } });
+  await queue.player.setGlobalVolume(queue.volume);
+  nowPlayingCallback?.(guildId, first, queue);
+  return true;
+}
+
 export async function joinAndPlay(
   guildId: string,
   voiceChannelId: string,
