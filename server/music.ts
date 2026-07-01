@@ -996,15 +996,13 @@ async function advanceQueue(player: Player, guildId: string): Promise<void> {
       }
 
       // Capture the just-finished track for autoplay seeding & repeat avoidance.
-      // Only autoplay-fetched tracks are added to the exclusion list — user-queued
-      // tracks stay eligible so autoplay can resurface them as discovery picks.
+      // Every played track is added to the exclusion list — user-queued and
+      // autoplay alike — so autoplay never resurfaces something already heard.
       if (q.current) {
         q.recentSeeds.push(q.current);
         if (q.recentSeeds.length > 5) q.recentSeeds.shift();
-        if (q.current.requestedBy === "autoplay") {
-          q.recentlyPlayedUris.push(q.current.uri);
-          if (q.recentlyPlayedUris.length > 50) q.recentlyPlayedUris.shift();
-        }
+        q.recentlyPlayedUris.push(q.current.uri);
+        if (q.recentlyPlayedUris.length > 200) q.recentlyPlayedUris.shift();
       }
 
       q.current = null;
@@ -1018,7 +1016,7 @@ async function advanceQueue(player: Player, guildId: string): Promise<void> {
         const seed = q.recentSeeds[q.recentSeeds.length - 1];
         if (seed) {
           q.isFetchingAutoplay = true;
-          const exclude = new Set(q.recentlyPlayedUris);
+          const exclude = new Set([...q.recentlyPlayedUris, ...q.tracks.map(t => t.uri)]);
           fetchAutoplayTracks(seed, 5, exclude, guildId, q.textChannelId)
             .then((fetched) => {
               const liveQ = queues.get(guildId);
@@ -1325,6 +1323,29 @@ export interface SearchResult {
   uri: string;
   duration: number;
   isStream: boolean;
+}
+
+// Like searchTracks but returns full QueueTrack objects (with encoded + artworkUrl)
+// suitable for directly queueing. Used for artist discography mode.
+export async function searchAsQueueTracks(query: string, limit = 20, requestedBy = "autoplay"): Promise<QueueTrack[]> {
+  if (!shoukaku) return [];
+  const node = shoukaku.getIdealNode();
+  if (!node) return [];
+  try {
+    const result = await resolveWithTimeout(node, query);
+    if (!result) return [];
+    const raw: any[] =
+      result.loadType === "search" ? (result.data as any[]) :
+      result.loadType === "playlist" ? ((result.data as any).tracks ?? []) :
+      result.loadType === "track" ? [result.data] :
+      [];
+    return raw
+      .filter((r: any) => r?.encoded && r?.info && !r.info.isStream)
+      .slice(0, limit)
+      .map((r: any) => rawToTrack(r, requestedBy));
+  } catch {
+    return [];
+  }
 }
 
 // ── Autocomplete result cache ─────────────────────────────────────────────────
@@ -1913,61 +1934,6 @@ async function waitForJoin(guildId: string): Promise<GuildQueue | null> {
   });
 }
 
-// ── snapshotQueueForRestart ───────────────────────────────────────────────────
-// Freezes a guild's live queue so it can be restored after a scheduled bot
-// restart. The current track is prepended at index 0 so it replays from the
-// top. No TTL extension needed — 30 min covers any realistic restart window.
-export function snapshotQueueForRestart(guildId: string): void {
-  const queue = queues.get(guildId);
-  if (!queue) return;
-  const allTracks = queue.current
-    ? [queue.current, ...queue.tracks]
-    : [...queue.tracks];
-  if (allTracks.length === 0) return;
-  frozenQueues.set(guildId, {
-    tracks: allTracks,
-    textChannelId: queue.textChannelId,
-    voiceChannelId: queue.voiceChannelId,
-    volume: queue.volume,
-    loop: queue.loop,
-    autoplay: queue.autoplay,
-    recentSeeds: [...queue.recentSeeds],
-    recentlyPlayedUris: [...queue.recentlyPlayedUris],
-    frozenAt: Date.now(),
-  });
-}
-
-// ── joinVoiceOnly ─────────────────────────────────────────────────────────────
-// Joins a voice channel and, if a frozen queue snapshot exists (e.g. left by
-// snapshotQueueForRestart), restores it and resumes playback automatically.
-export async function joinVoiceOnly(
-  guildId: string,
-  voiceChannelId: string,
-  textChannelId: string,
-  shardId = 0,
-): Promise<void> {
-  if (!shoukaku) return;
-  if (queues.has(guildId)) return;
-
-  const queue = await createQueue(guildId, voiceChannelId, textChannelId, shardId);
-
-  const frozen = popFrozenQueue(guildId);
-  if (!frozen || frozen.tracks.length === 0) return;
-
-  queue.volume = frozen.volume;
-  queue.loop = frozen.loop;
-  queue.autoplay = frozen.autoplay;
-  queue.recentSeeds = [...frozen.recentSeeds];
-  queue.recentlyPlayedUris = [...frozen.recentlyPlayedUris];
-
-  const [first, ...rest] = frozen.tracks;
-  queue.tracks.push(...rest);
-  queue.current = first;
-  await resetPlayerFilters(queue.player, guildId);
-  await queue.player.playTrack({ track: { encoded: first.encoded } });
-  await queue.player.setGlobalVolume(queue.volume);
-  nowPlayingCallback?.(guildId, first, queue);
-}
 
 export async function joinAndPlay(
   guildId: string,
@@ -2249,6 +2215,40 @@ export async function reconnectMusic(guildId: string): Promise<ReconnectResult> 
     log(`[Music] Manual reconnect failed for guild ${guildId}: ${err.message}`, "discord");
     return { ok: false, reason: "rejoin-failed", message: err.message };
   }
+}
+
+// ── debugReset ────────────────────────────────────────────────────────────────
+// Comprehensive fix for any known stuck / glitched state. Called by /debug.
+// Returns a list of human-readable actions taken.
+export async function debugReset(guildId: string): Promise<string[]> {
+  const actions: string[] = [];
+  const queue = queues.get(guildId);
+
+  if (!queue) {
+    return ["no active music session in this server — use /play to start one"];
+  }
+
+  // Clear all stuck in-memory flags so reconnectMusic starts clean
+  let flagsCleared = false;
+  if (queue.isAdvancing)      { queue.isAdvancing = false;      flagsCleared = true; }
+  if (queue.isRecovering)     { queue.isRecovering = false;     flagsCleared = true; }
+  if (queue.isFetchingAutoplay) { queue.isFetchingAutoplay = false; flagsCleared = true; }
+  if (queue.isStopped)        { queue.isStopped = false;        flagsCleared = true; }
+  if (flagsCleared) actions.push("cleared stuck internal flags");
+
+  // Migrate to a fresh Lavalink node and resume playback
+  const result = await reconnectMusic(guildId);
+  if (result.ok) {
+    const where = result.trackTitle
+      ? `resumed **${result.trackTitle}**${result.resumedAt > 0 ? ` at ${formatDuration(result.resumedAt)}` : ""}`
+      : "rejoined voice channel (queue was empty)";
+    const node = result.nodeName ? ` on \`${result.nodeName}\`` : "";
+    actions.push(`reconnected to a fresh Lavalink node${node} — ${where}`);
+  } else {
+    actions.push(`node reconnect: ${result.message}`);
+  }
+
+  return actions;
 }
 
 export async function pauseMusic(guildId: string): Promise<boolean> {

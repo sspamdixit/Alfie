@@ -57,8 +57,8 @@ import {
   getCrossfadeSeconds,
   setCustomEqBand,
   fetchSpotifyPlaylistTracks,
-  getMusicStatus,
-  joinVoiceOnly,
+  debugReset,
+  searchAsQueueTracks,
   type QueueTrack,
   type GuildQueue,
   type FilterPreset,
@@ -562,6 +562,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName("skip").setDescription("skip the current track"),
   new SlashCommandBuilder().setName("stop").setDescription("stop music and disconnect"),
   new SlashCommandBuilder().setName("reconnect").setDescription("force a switch to a fresh lavalink node"),
+  new SlashCommandBuilder().setName("debug").setDescription("diagnose and fix any connection or playback issues"),
   new SlashCommandBuilder().setName("disconnect").setDescription("disconnect from the voice channel"),
   new SlashCommandBuilder().setName("pause").setDescription("pause the current track"),
   new SlashCommandBuilder().setName("resume").setDescription("resume the paused track"),
@@ -700,64 +701,6 @@ const SLASH_COMMANDS = [
 ];
 
 // ── Bot startup ───────────────────────────────────────────────────────────────
-// ── Scheduled periodic restart (every 6 h) ────────────────────────────────────
-const PERIODIC_RESTART_MS = 6 * 60 * 60 * 1000;
-let restartQueued = false;
-
-interface RejoinEntry { guildId: string; voiceChannelId: string; textChannelId: string; }
-let pendingRejoinSessions: RejoinEntry[] = [];
-
-function performBotRestart(): void {
-  log("Performing scheduled restart now.", "restart");
-  restartQueued = false;
-  // Capture 24/7 guild sessions so the bot can rejoin them after restart.
-  // This survives stopAlessa() because it's a module-level variable.
-  pendingRejoinSessions = getMusicStatus()
-    .filter((s) => guilds247.has(s.guildId))
-    .map((s) => ({ guildId: s.guildId, voiceChannelId: s.voiceChannelId, textChannelId: s.textChannelId }));
-  stopAlessa();
-  const t = setTimeout(() => { startAlessa(); }, 3_000);
-  t.unref?.();
-}
-
-function scheduleRestartWhenIdle(): void {
-  // Only wait on non-24/7 sessions — 24/7 guilds may never stop, and the bot
-  // will rejoin them automatically after restart anyway.
-  const blocking = getMusicStatus().filter((s) => s.current !== null && !guilds247.has(s.guildId));
-  if (blocking.length === 0) {
-    performBotRestart();
-    return;
-  }
-  const t = setTimeout(() => {
-    backgroundTimers.delete(t);
-    scheduleRestartWhenIdle();
-  }, 60_000);
-  t.unref?.();
-  backgroundTimers.add(t);
-}
-
-function schedulePeriodicRestart(): void {
-  const t = setTimeout(() => {
-    backgroundTimers.delete(t);
-    log("6-hour restart window reached — checking music sessions.", "restart");
-    // 24/7 guilds don't block the restart — they get rejoined after.
-    const blocking = getMusicStatus().filter((s) => s.current !== null && !guilds247.has(s.guildId));
-    if (blocking.length === 0) {
-      performBotRestart();
-    } else {
-      restartQueued = true;
-      log(`Restart queued — ${blocking.length} non-24/7 session(s) still playing.`, "restart");
-      for (const session of blocking) {
-        const ch = client?.channels.cache.get(session.textChannelId) as TextChannel | null;
-        ch?.send({ content: "🔄 scheduled restart coming up~ i'll restart once the music stops ♡", allowedMentions: { parse: [] } }).catch(() => {});
-      }
-      scheduleRestartWhenIdle();
-    }
-  }, PERIODIC_RESTART_MS);
-  t.unref?.();
-  backgroundTimers.add(t);
-}
-
 export async function startAlessa(): Promise<void> {
   const rawToken = (process.env.ALESSA_TOKEN ?? process.env.ALFIE_TOKEN ?? process.env.DISCORD_TOKEN ?? "").trim();
   if (!rawToken) {
@@ -845,21 +788,6 @@ export async function startAlessa(): Promise<void> {
     initMusic(readyClient);
     setTTSClient(readyClient);
 
-    // Rejoin any 24/7 VCs that were active before the scheduled restart
-    if (pendingRejoinSessions.length > 0) {
-      const toRejoin = [...pendingRejoinSessions];
-      pendingRejoinSessions = [];
-      for (const session of toRejoin) {
-        const shardId = readyClient.guilds.cache.get(session.guildId)?.shardId ?? 0;
-        joinVoiceOnly(session.guildId, session.voiceChannelId, session.textChannelId, shardId)
-          .then(() => {
-            const ch = readyClient.channels.cache.get(session.textChannelId) as TextChannel | null;
-            ch?.send({ content: "🔄 restarted and back~ waiting for your next song ♡", allowedMentions: { parse: [] } }).catch(() => {});
-          })
-          .catch((err: any) => log(`[restart] Failed to rejoin VC for guild ${session.guildId}: ${err.message}`, "restart"));
-      }
-    }
-
     // Load persistent guild settings (request channels, crossfade)
     try {
       const allSettings = await storage.getAllGuildSettings();
@@ -921,11 +849,7 @@ export async function startAlessa(): Promise<void> {
 
     setQueueStopCallback((guildId) => {
       markGuildStopped(guildId);
-      // If a restart is queued, check whether all sessions are now idle
-      if (restartQueued) scheduleRestartWhenIdle();
     });
-
-    schedulePeriodicRestart();
 
     // Register slash commands per guild
     const rest = new REST({ version: "10" }).setToken(rawToken);
@@ -967,11 +891,27 @@ export async function startAlessa(): Promise<void> {
           }
           if (dedupedItems.length >= 8) break;
         }
+        // Detect dominant artist — surface a discography option when 2+ results share the same artist
+        const artistCounts = new Map<string, number>();
+        for (const t of results) {
+          if (t.author) artistCounts.set(t.author, (artistCounts.get(t.author) ?? 0) + 1);
+        }
+        let topArtist: string | null = null;
+        let topCount = 0;
+        for (const [artist, count] of artistCounts) {
+          if (count > topCount) { topArtist = artist; topCount = count; }
+        }
+        const artistItems: Array<{ uri: string; text: string; label: string }> = [];
+        if (topArtist && topCount >= 2) {
+          const label = truncateDiscordText(`🎤 ${topArtist} — play discography`, 100);
+          artistItems.push({ uri: `artist:${topArtist}`, text: label, label });
+        }
         // Cache so /play can resolve the exact track, not a fresh re-search
         const acKey = `${interaction.guildId}:${interaction.user.id}`;
-        acCacheStore(acKey, dedupedItems);
+        const allItems = [...artistItems, ...dedupedItems];
+        acCacheStore(acKey, allItems);
         await interaction.respond(
-          dedupedItems.map((item, i) => ({
+          allItems.map((item, i) => ({
             name: item.label,
             value: `ac:${i}|${item.text}`.slice(0, 100),
           })),
@@ -1305,6 +1245,33 @@ export async function startAlessa(): Promise<void> {
       const member = interaction.guild?.members.cache.get(interaction.user.id);
       const voiceChannel = member?.voice?.channel;
       if (!voiceChannel) { await replyEph("join a voice channel first~ ehehe"); return; }
+
+      // Artist discography mode — queue top tracks by the selected artist
+      if (query.startsWith("artist:")) {
+        const artistName = query.slice("artist:".length).trim();
+        await interaction.deferReply();
+        try {
+          await interaction.editReply({ content: `🎤 fetching **${artistName}** discography~`, allowedMentions: { parse: [] } });
+          const artistResults = await searchAsQueueTracks(`ytmsearch:${artistName}`, 25, interaction.user.username);
+          // Prefer tracks whose author closely matches the artist name
+          const q2 = artistName.toLowerCase();
+          const filtered = artistResults.filter((t) => {
+            const a = (t.author ?? "").toLowerCase();
+            return a.includes(q2) || q2.includes(a);
+          });
+          const tracksToQueue = (filtered.length >= 5 ? filtered : artistResults).slice(0, 20);
+          if (!tracksToQueue.length) {
+            await interaction.editReply({ content: `couldn't find any tracks by **${artistName}**~ try a different spelling?`, allowedMentions: { parse: [] } });
+            return;
+          }
+          const result = await joinAndPlayMultiple(guildId, voiceChannel.id, interaction.channelId, tracksToQueue, interaction.guild?.shardId ?? 0);
+          await interaction.editReply({ content: `${result === "playing" ? "▶ playing" : "queued"} **${tracksToQueue.length} tracks** by **${artistName}** ♡`, allowedMentions: { parse: [] } });
+        } catch (err: any) {
+          await interaction.editReply({ content: `artist search went oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
+        }
+        return;
+      }
+
       await interaction.deferReply();
       try {
         // Snapshot whether a session is actively playing RIGHT NOW, before any
@@ -1442,6 +1409,18 @@ export async function startAlessa(): Promise<void> {
         }
       } catch (err: any) {
         await interaction.editReply({ content: `reconnect went oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
+      }
+      return;
+    }
+
+    if (commandName === "debug") {
+      await interaction.deferReply();
+      try {
+        const actions = await debugReset(guildId);
+        const lines = actions.map((a) => `• ${a}`).join("\n");
+        await interaction.editReply({ content: `🔧 debug complete~\n${lines}`, allowedMentions: { parse: [] } });
+      } catch (err: any) {
+        await interaction.editReply({ content: `debug went oopsie~ ${err.message}`, allowedMentions: { parse: [] } });
       }
       return;
     }
@@ -2350,7 +2329,6 @@ export function getAlessaGuilds(): Array<{ id: string; name: string }> {
 }
 
 export function stopAlessa(): void {
-  restartQueued = false;
   if (loginRetryTimer) { clearTimeout(loginRetryTimer); loginRetryTimer = null; }
   for (const t of backgroundTimers) { clearInterval(t); clearTimeout(t); }
   backgroundTimers.clear();
