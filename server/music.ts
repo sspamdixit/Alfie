@@ -320,6 +320,22 @@ function popFrozenQueue(guildId: string): FrozenQueueSnapshot | null {
   return entry;
 }
 
+// Peek without consuming — used by bot to persist idle-247 snapshots to DB.
+export function getFrozenQueueSnapshot(guildId: string): FrozenQueueSnapshot | null {
+  const entry = frozenQueues.get(guildId);
+  if (!entry) return null;
+  if (Date.now() - entry.frozenAt > FROZEN_QUEUE_TTL_MS) {
+    frozenQueues.delete(guildId);
+    return null;
+  }
+  return entry;
+}
+
+// Inject a snapshot from outside (e.g. loaded from DB on startup). Resets TTL.
+export function setFrozenQueue(guildId: string, snapshot: Omit<FrozenQueueSnapshot, "frozenAt">): void {
+  frozenQueues.set(guildId, { ...snapshot, frozenAt: Date.now() });
+}
+
 type NowPlayingCallbackFn = (guildId: string, track: QueueTrack, queue: GuildQueue) => void;
 type TextNotifyFn = (guildId: string, textChannelId: string, message: string) => void;
 type QueueStopCallbackFn = (guildId: string) => void;

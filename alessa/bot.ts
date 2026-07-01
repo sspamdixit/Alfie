@@ -60,6 +60,8 @@ import {
   debugReset,
   searchAsQueueTracks,
   freezeQueue,
+  getFrozenQueueSnapshot,
+  setFrozenQueue,
   joinAndResumeFrozen,
   type QueueTrack,
   type GuildQueue,
@@ -711,6 +713,9 @@ const SLASH_COMMANDS = [
 // remains visible without wasting node resources on empty playback.
 async function enterIdle247(guildId: string, voiceChannelId: string, textChannelId: string, shardId: number): Promise<void> {
   freezeQueue(guildId);
+  // Persist the frozen queue + VC info to DB so we survive restarts
+  const snapshot = getFrozenQueueSnapshot(guildId);
+  storage.set247IdleState(guildId, voiceChannelId, textChannelId, shardId, snapshot ? JSON.stringify(snapshot) : null).catch(() => {});
   await disconnectMusic(guildId);
   const guild = client?.guilds.cache.get(guildId);
   if (!guild) return;
@@ -733,6 +738,9 @@ async function enterIdle247(guildId: string, voiceChannelId: string, textChannel
 function exitIdle247(guildId: string): void {
   idle247Connections.delete(guildId);
   try { getVoiceConnection(guildId)?.destroy(); } catch { /* ignore */ }
+  // Note: frozen_queue_247 in DB is NOT cleared here — it is cleared only after
+  // successful resume (so a restart mid-wake can still recover), or when 24/7 is
+  // explicitly turned off via /247 (set247Off clears the whole row).
 }
 
 // ── Bot startup ───────────────────────────────────────────────────────────────
@@ -833,6 +841,55 @@ export async function startAlessa(): Promise<void> {
       log(`[Alessa] Loaded settings for ${allSettings.length} guild(s)`, "alessa");
     } catch (e: any) {
       log(`[Alessa] Could not load guild settings from DB: ${e.message}`, "alessa");
+    }
+
+    // Restore 24/7 guilds — rejoin VCs immediately after restart/update
+    try {
+      const rows247 = await storage.getAll247Guilds();
+      let rejoined = 0;
+      for (const row of rows247) {
+        // Always restore the in-memory flag, even if we can't rejoin the VC right now
+        guilds247.add(row.guildId);
+
+        if (!row.voiceChannelId || !row.textChannelId) continue; // mode on but never entered idle yet
+
+        const guild = readyClient.guilds.cache.get(row.guildId);
+        if (!guild) {
+          log(`[247] Guild ${row.guildId} not in cache on startup — flag restored, VC rejoin skipped`, "alessa");
+          continue;
+        }
+        // Restore frozen queue into memory so it survives until someone joins
+        if (row.frozenQueueJson) {
+          try {
+            const snapshot = JSON.parse(row.frozenQueueJson);
+            setFrozenQueue(row.guildId, snapshot);
+          } catch {
+            log(`[247] Could not parse frozen queue for guild ${row.guildId}`, "alessa");
+          }
+        }
+        // Sit silently in the VC (muted + deafened) — no Lavalink until someone joins
+        try {
+          dvsJoinVC({
+            channelId: row.voiceChannelId,
+            guildId: row.guildId,
+            adapterCreator: guild.voiceAdapterCreator,
+            selfDeaf: true,
+            selfMute: true,
+          });
+          idle247Connections.set(row.guildId, {
+            voiceChannelId: row.voiceChannelId,
+            textChannelId: row.textChannelId,
+            shardId: row.shardId,
+          });
+          rejoined++;
+          log(`[247] Rejoined VC ${row.voiceChannelId} in guild ${row.guildId} after restart`, "alessa");
+        } catch (err: any) {
+          log(`[247] Failed to rejoin VC for guild ${row.guildId} on startup: ${err.message}`, "alessa");
+        }
+      }
+      if (rows247.length > 0) log(`[247] Restored ${rows247.length} 24/7 guild(s) (${rejoined} VC rejoin(s))`, "alessa");
+    } catch (e: any) {
+      log(`[Alessa] Could not restore 24/7 guilds from DB: ${e.message}`, "alessa");
     }
 
     setNowPlayingCallback((guildId, track, queue) => {
@@ -1962,9 +2019,11 @@ export async function startAlessa(): Promise<void> {
       if (guilds247.has(guildId)) {
         guilds247.delete(guildId);
         if (idle247Connections.has(guildId)) exitIdle247(guildId);
+        storage.set247Off(guildId).catch(() => {});
         await interaction.reply({ content: "24/7 mode **off**~ i'll leave when everyone's gone ♡", allowedMentions: { parse: [] } });
       } else {
         guilds247.add(guildId);
+        storage.set247On(guildId).catch(() => {});
         await interaction.reply({ content: "24/7 mode **on**~! i'll stay in VC, but i'll free the node when no one's around ♡", allowedMentions: { parse: [] } });
       }
       return;
@@ -2192,17 +2251,28 @@ export async function startAlessa(): Promise<void> {
     // ── Wake up from idle 24/7 mode ─────────────────────────────────────────
     const idle247Entry = idle247Connections.get(guildId);
     if (idle247Entry && joinedChannelId === idle247Entry.voiceChannelId) {
+      // Only wake for human members — bots joining shouldn't trigger playback
+      if (newState.member?.user.bot) return;
+
       exitIdle247(guildId);
       // Wait for the @discordjs/voice connection to release before Shoukaku joins
       await new Promise<void>((r) => setTimeout(r, 400));
-      const resumed = await joinAndResumeFrozen(
-        guildId, idle247Entry.voiceChannelId, idle247Entry.textChannelId, idle247Entry.shardId,
-      );
       const ch = client?.channels.cache.get(idle247Entry.textChannelId) as TextChannel | null;
-      if (resumed) {
-        ch?.send({ content: "yay, someone's back~ resuming ♡", allowedMentions: { parse: [] } }).catch(() => {});
-      } else {
-        ch?.send({ content: "someone's here~ use /play to add songs ♡", allowedMentions: { parse: [] } }).catch(() => {});
+      try {
+        const resumed = await joinAndResumeFrozen(
+          guildId, idle247Entry.voiceChannelId, idle247Entry.textChannelId, idle247Entry.shardId,
+        );
+        // Resume succeeded — safe to wipe the persisted frozen queue
+        storage.clear247FrozenQueue(guildId).catch(() => {});
+        if (resumed) {
+          ch?.send({ content: "yay, someone's back~ resuming ♡", allowedMentions: { parse: [] } }).catch(() => {});
+        } else {
+          ch?.send({ content: "someone's here~ use /play to add songs ♡", allowedMentions: { parse: [] } }).catch(() => {});
+        }
+      } catch (err: any) {
+        log(`[247] Failed to resume on wake for guild ${guildId}: ${err.message}`, "discord");
+        ch?.send({ content: "oops, had trouble resuming~ try /play to restart ♡", allowedMentions: { parse: [] } }).catch(() => {});
+        // frozen_queue_247 intentionally left in DB so a restart can still restore it
       }
       return;
     }

@@ -4,6 +4,14 @@ import { eq, and, sql, desc, count } from "drizzle-orm";
 import { type User, type InsertUser, type SavedPlaylist, type PlaylistTrack, type GuildSettingsRow } from "@shared/schema";
 import { randomUUID } from "crypto";
 
+export interface Guild247Row {
+  guildId: string;
+  voiceChannelId: string | null;
+  textChannelId: string | null;
+  shardId: number;
+  frozenQueueJson: string | null;
+}
+
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -26,6 +34,12 @@ export interface IStorage {
   getAllGuildSettings(): Promise<GuildSettingsRow[]>;
   setRequestChannel(guildId: string, channelId: string | null): Promise<void>;
   setGuildCrossfade(guildId: string, seconds: number): Promise<void>;
+  // 24/7 persistence
+  set247On(guildId: string): Promise<void>;
+  set247Off(guildId: string): Promise<void>;
+  set247IdleState(guildId: string, voiceChannelId: string, textChannelId: string, shardId: number, frozenQueueJson: string | null): Promise<void>;
+  clear247FrozenQueue(guildId: string): Promise<void>;
+  getAll247Guilds(): Promise<Guild247Row[]>;
 }
 
 export async function ensurePlaylistTables(): Promise<void> {
@@ -95,6 +109,23 @@ async function ensureExtraTablesOnce(): Promise<void> {
     )
   `);
   extraTablesReady = true;
+}
+
+let guild247ColumnsReady = false;
+async function ensure247ColumnsOnce(): Promise<void> {
+  if (guild247ColumnsReady) return;
+  await ensureExtraTablesOnce();
+  // SQLite doesn't support IF NOT EXISTS on ALTER TABLE — wrap each in try/catch
+  for (const ddl of [
+    `ALTER TABLE guild_settings ADD COLUMN mode_247 INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE guild_settings ADD COLUMN voice_channel_247 TEXT`,
+    `ALTER TABLE guild_settings ADD COLUMN text_channel_247 TEXT`,
+    `ALTER TABLE guild_settings ADD COLUMN shard_id_247 INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE guild_settings ADD COLUMN frozen_queue_247 TEXT`,
+  ]) {
+    try { await db.run(sql.raw(ddl)); } catch { /* column already exists */ }
+  }
+  guild247ColumnsReady = true;
 }
 
 export class DrizzleStorage implements IStorage {
@@ -280,6 +311,68 @@ export class DrizzleStorage implements IStorage {
       .insert(guildSettings)
       .values({ guildId, crossfadeSeconds: seconds })
       .onConflictDoUpdate({ target: guildSettings.guildId, set: { crossfadeSeconds: seconds } });
+  }
+
+  // ── 24/7 persistence ────────────────────────────────────────────────────────
+
+  async set247On(guildId: string): Promise<void> {
+    await ensure247ColumnsOnce();
+    await db.run(
+      sql`INSERT INTO guild_settings (guild_id, mode_247, crossfade_seconds) VALUES (${guildId}, 1, 0)
+          ON CONFLICT(guild_id) DO UPDATE SET mode_247 = 1`,
+    );
+  }
+
+  async set247Off(guildId: string): Promise<void> {
+    await ensure247ColumnsOnce();
+    await db.run(
+      sql`UPDATE guild_settings SET mode_247 = 0, voice_channel_247 = NULL, text_channel_247 = NULL,
+          shard_id_247 = 0, frozen_queue_247 = NULL WHERE guild_id = ${guildId}`,
+    );
+  }
+
+  async set247IdleState(
+    guildId: string,
+    voiceChannelId: string,
+    textChannelId: string,
+    shardId: number,
+    frozenQueueJson: string | null,
+  ): Promise<void> {
+    await ensure247ColumnsOnce();
+    await db.run(
+      sql`INSERT INTO guild_settings (guild_id, mode_247, voice_channel_247, text_channel_247, shard_id_247, frozen_queue_247, crossfade_seconds)
+          VALUES (${guildId}, 1, ${voiceChannelId}, ${textChannelId}, ${shardId}, ${frozenQueueJson}, 0)
+          ON CONFLICT(guild_id) DO UPDATE SET
+            mode_247 = 1,
+            voice_channel_247 = ${voiceChannelId},
+            text_channel_247 = ${textChannelId},
+            shard_id_247 = ${shardId},
+            frozen_queue_247 = ${frozenQueueJson}`,
+    );
+  }
+
+  async clear247FrozenQueue(guildId: string): Promise<void> {
+    await ensure247ColumnsOnce();
+    await db.run(
+      sql`UPDATE guild_settings SET frozen_queue_247 = NULL WHERE guild_id = ${guildId}`,
+    );
+  }
+
+  async getAll247Guilds(): Promise<Guild247Row[]> {
+    await ensure247ColumnsOnce();
+    const rows = await db.run(
+      sql`SELECT guild_id, voice_channel_247, text_channel_247, shard_id_247, frozen_queue_247
+          FROM guild_settings WHERE mode_247 = 1`,
+    );
+    // libSQL returns rows as an array of arrays; columns come back in select order
+    return (rows.rows as unknown as Array<[string, string | null, string | null, number | null, string | null]>)
+      .map(r => ({
+        guildId: r[0],
+        voiceChannelId: r[1] ?? null,
+        textChannelId: r[2] ?? null,
+        shardId: r[3] ?? 0,
+        frozenQueueJson: r[4] ?? null,
+      }));
   }
 }
 
